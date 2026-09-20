@@ -26,6 +26,18 @@ class NodeType(str, Enum):
     RAG = "rag"
 
 
+class InputType(str, Enum):
+    """
+    What kind of input the user is sending.
+    The classifier maps this (+ query keywords) → NodeType.
+    """
+    TEXT = "text"
+    IMAGE = "image"
+    CODE = "code"
+    REASONING = "reasoning"
+    RETRIEVAL = "retrieval"
+
+
 class RequestStatus(str, Enum):
     SUCCESS = "success"
     ERROR = "error"
@@ -99,3 +111,76 @@ class ErrorResponse(BaseModel):
 
     detail: str
     code: Optional[str] = None
+
+
+# ── Phase 2: /api/v1/query ─────────────────────────────────────────────────────
+
+class QueryRequest(BaseModel):
+    """Request body for POST /api/v1/query."""
+
+    user_id: str = Field(..., min_length=1, description="Caller identifier.")
+    query: str = Field(..., min_length=1, description="The user's question or instruction.")
+    input_type: InputType = Field(
+        default=InputType.TEXT,
+        description="Hint about the nature of the input (text / image / code / reasoning / retrieval).",
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Optional session ID for multi-turn conversations.",
+    )
+    parameters: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Model-specific overrides (temperature, max_tokens, etc.).",
+    )
+
+
+class ClassificationResult(BaseModel):
+    """Output of the input classifier — what capability is needed."""
+
+    input_type: InputType
+    node_type: NodeType
+    confidence: str = "rule-based"   # will become a float score in Phase 3
+    matched_rule: Optional[str] = None
+
+
+class QueryResponse(BaseModel):
+    """Response envelope for POST /api/v1/query."""
+
+    request_id: str
+    user_id: str
+    session_id: Optional[str] = None
+    input_type: InputType
+    classification: ClassificationResult
+    selected_node: str          # node_id  e.g. "NODE-TEXT"
+    selected_model: str
+    response: str
+    latency_ms: float
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class NodeFailureResponse(BaseModel):
+    """Returned when the selected node is unavailable or returns an error."""
+
+    request_id: str
+    user_id: str
+    selected_node: str
+    error_type: str             # "connection_error" | "timeout" | "http_error" | "node_not_configured"
+    detail: str
+    latency_ms: float
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ── Phase 2: Node Registry ─────────────────────────────────────────────────────
+
+class NodeRegistryEntry(BaseModel):
+    """Full descriptor for one worker node as exposed by the registry API."""
+
+    node_id: str
+    node_name: str
+    capability: str
+    node_type: NodeType
+    model: str
+    endpoint: str
+    status: str                 # "online" | "offline" | "not_configured"
+    supported_input_types: List[str]
+    priority: int               # lower = higher priority (1 = primary)

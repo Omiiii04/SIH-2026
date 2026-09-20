@@ -1,25 +1,45 @@
 """
-Tests for the request routing logic in orchestrator.router.
+tests/test_router.py
+─────────────────────
+Unit tests for request classification / routing logic.
+
+Phase 1 used a function called route_request(); Phase 2 replaced it with
+the classify() function in orchestrator.classifier. These tests now cover
+the same routing scenarios via the new classifier interface.
 """
 
 import pytest
 
-from orchestrator.router import route_request
-from orchestrator.schemas import InferenceRequest, NodeType
+from orchestrator.classifier import classify
+from orchestrator.schemas import InputType, NodeType
 
 
-def _req(prompt: str, node_type: NodeType | None = None) -> InferenceRequest:
-    """Helper to build a minimal InferenceRequest."""
-    return InferenceRequest(prompt=prompt, node_type=node_type)
+def _classify_text(prompt: str) -> NodeType:
+    """Helper: classify a plain-text prompt and return the target NodeType."""
+    return classify(prompt, InputType.TEXT).node_type
 
 
-# ── Explicit override tests ────────────────────────────────────────────────────
+# ── Explicit input_type override tests ────────────────────────────────────────
 
-def test_explicit_node_type_overrides_heuristics() -> None:
-    """If node_type is explicitly set, it must be returned unchanged."""
-    req = _req("write a python function", node_type=NodeType.VISION)
-    result = route_request(req)
-    assert result == NodeType.VISION
+def test_explicit_image_input_type_routes_to_vision() -> None:
+    """If input_type=IMAGE, must route to VISION regardless of query text."""
+    result = classify("write a python function to sort a list", InputType.IMAGE)
+    assert result.node_type == NodeType.VISION
+
+
+def test_explicit_code_input_type_routes_to_code() -> None:
+    result = classify("explain the history of Rome", InputType.CODE)
+    assert result.node_type == NodeType.CODE
+
+
+def test_explicit_reasoning_input_type_routes_to_reasoning() -> None:
+    result = classify("what is 2+2", InputType.REASONING)
+    assert result.node_type == NodeType.REASONING
+
+
+def test_explicit_retrieval_input_type_routes_to_rag() -> None:
+    result = classify("hello world", InputType.RETRIEVAL)
+    assert result.node_type == NodeType.RAG
 
 
 # ── Keyword heuristic tests ────────────────────────────────────────────────────
@@ -31,7 +51,7 @@ def test_explicit_node_type_overrides_heuristics() -> None:
     "review my code",
 ])
 def test_code_keywords_route_to_code(prompt: str) -> None:
-    assert route_request(_req(prompt)) == NodeType.CODE
+    assert _classify_text(prompt) == NodeType.CODE
 
 
 @pytest.mark.parametrize("prompt", [
@@ -40,7 +60,7 @@ def test_code_keywords_route_to_code(prompt: str) -> None:
     "perform OCR on this picture",
 ])
 def test_vision_keywords_route_to_vision(prompt: str) -> None:
-    assert route_request(_req(prompt)) == NodeType.VISION
+    assert _classify_text(prompt) == NodeType.VISION
 
 
 @pytest.mark.parametrize("prompt", [
@@ -49,16 +69,16 @@ def test_vision_keywords_route_to_vision(prompt: str) -> None:
     "explain why the sky is blue",
 ])
 def test_reasoning_keywords_route_to_reasoning(prompt: str) -> None:
-    assert route_request(_req(prompt)) == NodeType.REASONING
+    assert _classify_text(prompt) == NodeType.REASONING
 
 
 @pytest.mark.parametrize("prompt", [
     "search the document for key findings",
-    "based on the PDF, summarise section 3",
+    "based on the pdf, summarise section 3",
     "retrieve relevant passages from the knowledge base",
 ])
 def test_rag_keywords_route_to_rag(prompt: str) -> None:
-    assert route_request(_req(prompt)) == NodeType.RAG
+    assert _classify_text(prompt) == NodeType.RAG
 
 
 @pytest.mark.parametrize("prompt", [
@@ -68,5 +88,5 @@ def test_rag_keywords_route_to_rag(prompt: str) -> None:
     "what is the capital of France?",
 ])
 def test_generic_prompts_route_to_text(prompt: str) -> None:
-    """Prompts without specific keywords should fall back to text node."""
-    assert route_request(_req(prompt)) == NodeType.TEXT
+    """Prompts without specific keywords should fall back to the TEXT node."""
+    assert _classify_text(prompt) == NodeType.TEXT

@@ -1,33 +1,41 @@
 """
 SIH-2026 Orchestrator — FastAPI Application Entry Point.
 
-Exposes:
-  GET  /health          → lightweight liveness probe (no DB, no node calls)
-  GET  /health/cluster  → full cluster health (pings each worker node)
-  POST /infer           → route an inference request to the correct worker node
-
-Phase 1: routing logic and health structure are wired up.
-         Actual node HTTP calls are deferred to Phase 2.
+Routes
+------
+  GET  /health             → orchestrator liveness probe
+  GET  /health/cluster     → probes all worker nodes
+  GET  /api/v1/nodes       → lists the node registry
+  POST /api/v1/query       → Phase 2 live inference pipeline
+  POST /infer              → Phase 1 stub (kept for backward compatibility)
 """
 
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import datetime, timezone
+from typing import List, Union
+import uuid
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from orchestrator.config import get_settings
 from orchestrator.health import get_cluster_health
-from orchestrator.router import route_request
+from orchestrator.node_registry import list_nodes
+from orchestrator.router import handle_query
 from orchestrator.schemas import (
     ClusterHealthResponse,
     ErrorResponse,
     InferenceRequest,
     InferenceResponse,
+    NodeFailureResponse,
+    NodeRegistryEntry,
+    NodeType,
+    QueryRequest,
+    QueryResponse,
 )
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -60,19 +68,15 @@ app.add_middleware(
 )
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
+# ── Health routes ──────────────────────────────────────────────────────────────
 
 @app.get(
     "/health",
     tags=["Health"],
     summary="Orchestrator liveness probe",
-    response_description="Returns HTTP 200 when the orchestrator process is running.",
 )
 async def health_check() -> dict:
-    """
-    Simple liveness endpoint — does **not** probe worker nodes.
-    Used by load-balancers and CI checks to verify the process is up.
-    """
+    """Simple liveness endpoint — does NOT probe worker nodes."""
     return {
         "status": "ok",
         "service": cfg.app_name,
@@ -88,55 +92,87 @@ async def health_check() -> dict:
     response_model=ClusterHealthResponse,
 )
 async def cluster_health() -> ClusterHealthResponse:
-    """
-    Probes every registered worker node and returns their health status.
-    This call performs real network I/O to each node's LM Studio endpoint.
-    """
+    """Probes every registered worker node concurrently."""
     return await get_cluster_health()
 
 
+# ── Node registry route ────────────────────────────────────────────────────────
+
+@app.get(
+    "/api/v1/nodes",
+    tags=["Registry"],
+    summary="List all registered worker nodes",
+    response_model=List[NodeRegistryEntry],
+)
+async def get_nodes() -> List[NodeRegistryEntry]:
+    """
+    Returns the static node registry.
+    Each entry shows node_id, capability, endpoint, model, supported_input_types,
+    priority, and current status.
+    """
+    return list_nodes()
+
+
+# ── Phase 2: live inference ────────────────────────────────────────────────────
+
+@app.post(
+    "/api/v1/query",
+    tags=["Inference"],
+    summary="Send a query to the appropriate AI worker node",
+    responses={
+        200: {"model": QueryResponse, "description": "Successful inference"},
+        503: {"model": NodeFailureResponse, "description": "Node unavailable or returned an error"},
+    },
+)
+async def query(request: QueryRequest) -> JSONResponse:
+    """
+    Main Phase 2 inference endpoint.
+
+    Pipeline:
+      1. Classify the query (input_type + keyword rules) → NodeType
+      2. Look up the node in the registry
+      3. Call the LM Studio node via httpx
+      4. Return QueryResponse on success, NodeFailureResponse on node failure
+    """
+    result = await handle_query(request, timeout=cfg.http_timeout)
+
+    if isinstance(result, NodeFailureResponse):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=result.model_dump(mode="json"),
+        )
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content=result.model_dump(mode="json"),
+    )
+
+
+# ── Phase 1 stub (kept for backward compatibility) ─────────────────────────────
+
 @app.post(
     "/infer",
-    tags=["Inference"],
-    summary="Route an inference request to the appropriate worker node",
+    tags=["Inference (Phase 1 stub)"],
+    summary="[DEPRECATED] Phase 1 routing stub — use /api/v1/query instead",
     response_model=InferenceResponse,
-    status_code=status.HTTP_200_OK,
-    responses={503: {"model": ErrorResponse}},
+    deprecated=True,
 )
 async def infer(request: InferenceRequest) -> InferenceResponse:
-    """
-    Phase 1 stub:
-    - Determines the target NodeType via the router.
-    - Returns a placeholder response (no live node call yet).
+    """Retained for backward compatibility. Prefer POST /api/v1/query."""
+    from orchestrator.classifier import classify
+    from orchestrator.schemas import InputType
+    from orchestrator.node_registry import get_node_by_type
 
-    Phase 2 will replace the stub with an actual httpx call to the worker.
-    """
-    node_type = route_request(request)
-    cfg_local = get_settings()
-
-    node_url_map = {
-        "text": cfg_local.node_text_url,
-        "vision": cfg_local.node_vision_url,
-        "reasoning": cfg_local.node_reasoning_url,
-        "code": cfg_local.node_code_url,
-        "rag": cfg_local.node_rag_url,
-    }
-    node_url = node_url_map[node_type.value]
-
-    logger.info("Routing request to node_type=%s url=%s", node_type, node_url)
-
-    # ── Phase 2 TODO: replace stub with real httpx call ──────────────────────
-    stub_response = (
-        f"[Phase 1 stub] Request routed to '{node_type.value}' node at {node_url}. "
-        "Live inference will be enabled in Phase 2."
-    )
+    classification = classify(request.prompt, InputType.TEXT)
+    node = get_node_by_type(classification.node_type)
+    node_url = node.endpoint if node else ""
 
     return InferenceResponse(
         request_id=uuid.uuid4(),
         session_id=request.session_id,
-        node_type=node_type,
+        node_type=classification.node_type,
         node_url=node_url,
-        response=stub_response,
+        response="[Phase 1 stub] Use POST /api/v1/query for live inference.",
         latency_ms=0.0,
     )
 
