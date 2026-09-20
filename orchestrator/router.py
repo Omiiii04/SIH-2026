@@ -1,33 +1,21 @@
 """
 orchestrator/router.py
-──────────────────────
-Phase 3 Intelligent Router — pure pipeline, zero FastAPI imports.
+Phase 5 Intelligent Router - retry loop, fault tolerance, metrics.
 
-Pipeline
-────────
-  QueryRequest
-      ↓
-  classify(query, input_type)            →  ClassificationResult
-      ↓
-  get_online_node_for_capability(cap)    →  NodeRegistryEntry  (or fallback)
-      ↓
-  build_routing_decision(node, cls)      →  RoutingDecision
-      ↓
-  call_node(endpoint, model, …)          →  LMResponse  (or LMClientError)
-      ↓
-  QueryResponse | NodeFailureResponse
+Pipeline:
+  QueryRequest -> classify -> get_online_node_for_capability -> call_node -> [retry] -> Response
 
-Key Phase 3 additions:
-  * Uses required_capability (not raw NodeType) for node selection
-  * Consults capability fallback order when preferred node is offline
-  * Attaches a RoutingDecision with human-readable reason + was_fallback flag
-  * Never selects a node whose status == "offline" | "not_configured"
+Phase 5 additions:
+  * Retry loop capped at cfg.http_max_retries (prevents infinite loops)
+  * Dead nodes marked OFFLINE immediately; next retry picks different node
+  * Per-request metrics: routing_ms, inference_ms, total_ms, retry_count, fallback, final_node
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from typing import Union
 
@@ -51,10 +39,6 @@ from orchestrator.schemas import (
 
 logger = logging.getLogger(__name__)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Routing reason generator
-# ─────────────────────────────────────────────────────────────────────────────
 
 _TASK_REASON: dict[TaskType, str] = {
     TaskType.CODING:              "The request requires code generation.",
@@ -94,11 +78,10 @@ def _build_routing_reason(
         f" (classified by {cls.classifier_method.value}, confidence={cls.confidence:.0%})"
     )
     if was_fallback:
-        fallback_note = (
-            f" Primary node {preferred_node_id} is offline; "
-            f"falling back to {node_id}."
+        return (
+            base + qualifier + method_note
+            + f" Primary node {preferred_node_id} is offline; falling back to {node_id}."
         )
-        return base + qualifier + method_note + fallback_note
     return base + qualifier + method_note
 
 
@@ -115,131 +98,171 @@ def _build_routing_decision(
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Main pipeline
-# ─────────────────────────────────────────────────────────────────────────────
-
 async def handle_query(
     request: QueryRequest,
     timeout: float = 30.0,
 ) -> Union[QueryResponse, NodeFailureResponse]:
     """
-    Full Phase 3 request pipeline.
+    Phase 5 pipeline: classify -> retry loop -> metrics.
 
-    Returns
-    -------
-    QueryResponse       on successful inference.
-    NodeFailureResponse when no suitable node is available or inference fails.
+    Retries up to cfg.http_max_retries times across available nodes.
+    Dead nodes are marked offline so the next retry picks a different one.
+    Records routing_ms, inference_ms, total_ms, retry_count, fallback, status.
     """
+    from orchestrator.config import get_settings
+    from orchestrator.monitor import RequestRecord, record_request
+
+    cfg = get_settings()
+    MAX_RETRIES: int = max(1, cfg.http_max_retries)
+
     request_id = str(uuid.uuid4())
+    t_start = time.monotonic()
+
     logger.info(
         "[%s] user=%s  input_type=%s  query_len=%d",
         request_id, request.user_id, request.input_type, len(request.query),
     )
 
-    # ── Step 1: Hybrid classification ─────────────────────────────────────────
+    # Step 1: classify
     cls: ClassificationResult = await classify(request.query, request.input_type)
+    routing_ms = (time.monotonic() - t_start) * 1000
+
     logger.info(
-        "[%s] Classified → task=%s  capability=%s  difficulty=%s  confidence=%.2f  method=%s",
+        "[%s] Classified -> task=%s  capability=%s  difficulty=%s  confidence=%.2f  method=%s",
         request_id, cls.task_type, cls.required_capability,
         cls.difficulty, cls.confidence, cls.classifier_method,
     )
 
-    # ── Step 2: Node selection (capability-based, offline-aware) ──────────────
-    # Determine the "ideal" node (ignoring online status) for the reason string
     ideal_node = get_node_by_type(cls.node_type)
     preferred_node_id = ideal_node.node_id if ideal_node else f"NODE-{cls.node_type.value.upper()}"
 
-    # Get the best available online node for the required capability
-    node = get_online_node_for_capability(cls.required_capability)
+    # Step 2: retry loop
+    tried_nodes: set[str] = set()
+    last_exc: LMClientError | None = None
+    last_node_id: str = preferred_node_id
+    routing: RoutingDecision | None = None
 
-    if node is None:
-        reason = (
-            f"No online node available for capability '{cls.required_capability}'. "
-            f"All candidate nodes are offline or not configured."
+    for attempt in range(MAX_RETRIES):
+        node = get_online_node_for_capability(cls.required_capability)
+
+        # No more fresh nodes (all tried or all offline)
+        if node is None or node.node_id in tried_nodes:
+            logger.warning(
+                "[%s] No fresh online node for capability=%s (attempt %d)",
+                request_id, cls.required_capability, attempt + 1,
+            )
+            break
+
+        tried_nodes.add(node.node_id)
+        last_node_id = node.node_id
+        routing = _build_routing_decision(cls, node.node_id, preferred_node_id)
+
+        logger.info(
+            "[%s] Attempt %d/%d  node=%s  fallback=%s",
+            request_id, attempt + 1, MAX_RETRIES, node.node_id, routing.was_fallback,
         )
+
+        t_call_start = time.monotonic()
+        try:
+            lm_resp: LMResponse = await call_node(
+                endpoint=node.endpoint,
+                model=node.model,
+                query=request.query,
+                parameters=request.parameters,
+                timeout=timeout,
+            )
+        except LMClientError as exc:
+            last_exc = exc
+            logger.warning(
+                "[%s] Node failure: node=%s  type=%s  detail=%s (attempt %d/%d)",
+                request_id, node.node_id, exc.error_type, exc.detail, attempt + 1, MAX_RETRIES,
+            )
+            if exc.error_type in ("connection_error", "timeout"):
+                set_node_status(node.node_id, "offline")
+                logger.info("[%s] Marked %s offline.", request_id, node.node_id)
+            continue
+
+        # Success
+        inference_ms = (time.monotonic() - t_call_start) * 1000
+        total_ms     = (time.monotonic() - t_start) * 1000
+
+        logger.info(
+            "[%s] Success  node=%s  latency=%.1f ms  tokens=%s",
+            request_id, node.node_id, lm_resp.latency_ms, lm_resp.tokens_total,
+        )
+
+        response = QueryResponse(
+            request_id=request_id,
+            user_id=request.user_id,
+            session_id=request.session_id,
+            input_type=request.input_type,
+            classification=cls,
+            routing=routing,
+            selected_node=node.node_id,
+            selected_model=lm_resp.model,
+            response=lm_resp.content,
+            latency_ms=lm_resp.latency_ms,
+        )
+
+        record_request(RequestRecord(
+            success=True,
+            total_ms=round(total_ms, 1),
+            routing_ms=round(routing_ms, 1),
+            inference_ms=round(inference_ms, 1),
+            retry_count=attempt,
+            was_fallback=routing.was_fallback,
+            final_node=node.node_id,
+            status="success",
+        ))
+
+        try:
+            from orchestrator.persistence import persist_success
+            asyncio.create_task(persist_success(response, request))
+        except Exception as _e:
+            logger.debug("[%s] persist_success task creation failed: %s", request_id, _e)
+
+        return response
+
+    # All retries exhausted
+    total_ms = (time.monotonic() - t_start) * 1000
+    if routing is None:
         routing = RoutingDecision(
             selected_node=preferred_node_id,
-            reason=reason,
+            reason=f"No online node available for capability '{cls.required_capability}'.",
             was_fallback=False,
         )
-        logger.warning("[%s] No online node for capability=%s", request_id, cls.required_capability)
-        return NodeFailureResponse(
-            request_id=request_id,
-            user_id=request.user_id,
-            selected_node=preferred_node_id,
-            error_type="no_available_node",
-            detail=reason,
-            latency_ms=0.0,
-            routing=routing,
-        )
 
-    routing = _build_routing_decision(cls, node.node_id, preferred_node_id)
-    logger.info(
-        "[%s] Selected node=%s  fallback=%s  endpoint=%s",
-        request_id, node.node_id, routing.was_fallback, node.endpoint,
+    exc_type   = last_exc.error_type if last_exc else "no_available_node"
+    exc_detail = last_exc.detail     if last_exc else (
+        f"No online node available for capability '{cls.required_capability}'."
     )
+    exc_lat    = last_exc.latency_ms if last_exc else 0.0
 
-    # ── Step 3: Call LM Studio ────────────────────────────────────────────────
-    try:
-        lm_resp: LMResponse = await call_node(
-            endpoint=node.endpoint,
-            model=node.model,
-            query=request.query,
-            parameters=request.parameters,
-            timeout=timeout,
-        )
-    except LMClientError as exc:
-        logger.warning(
-            "[%s] Node failure: node=%s  type=%s  detail=%s",
-            request_id, node.node_id, exc.error_type, exc.detail,
-        )
-        # Mark node as offline in registry so subsequent requests use a different node
-        if exc.error_type in ("connection_error", "timeout"):
-            set_node_status(node.node_id, "offline")
-            logger.info("[%s] Marked %s as offline in registry", request_id, node.node_id)
-
-        failure_response = NodeFailureResponse(
-            request_id=request_id,
-            user_id=request.user_id,
-            selected_node=node.node_id,
-            error_type=exc.error_type,
-            detail=exc.detail,
-            latency_ms=exc.latency_ms,
-            routing=routing,
-        )
-        try:
-            from orchestrator.persistence import persist_failure
-            asyncio.create_task(persist_failure(failure_response, request))
-        except Exception as _persist_exc:
-            logger.debug("[%s] persist_failure task creation failed: %s", request_id, _persist_exc)
-
-        return failure_response
-
-    # ── Step 4: Build response ────────────────────────────────────────────────
-    logger.info(
-        "[%s] Success  node=%s  latency=%.1f ms  tokens=%s",
-        request_id, node.node_id, lm_resp.latency_ms, lm_resp.tokens_total,
-    )
-
-    response = QueryResponse(
+    failure_response = NodeFailureResponse(
         request_id=request_id,
         user_id=request.user_id,
-        session_id=request.session_id,
-        input_type=request.input_type,
-        classification=cls,
+        selected_node=last_node_id,
+        error_type=exc_type,
+        detail=exc_detail,
+        latency_ms=exc_lat,
         routing=routing,
-        selected_node=node.node_id,
-        selected_model=lm_resp.model,
-        response=lm_resp.content,
-        latency_ms=lm_resp.latency_ms,
     )
 
-    # ── Step 5: Persist (fire-and-forget, never blocks response) ─────────
-    try:
-        from orchestrator.persistence import persist_success
-        asyncio.create_task(persist_success(response, request))
-    except Exception as _persist_exc:
-        logger.debug("[%s] persist_success task creation failed: %s", request_id, _persist_exc)
+    record_request(RequestRecord(
+        success=False,
+        total_ms=round(total_ms, 1),
+        routing_ms=round(routing_ms, 1),
+        inference_ms=0.0,
+        retry_count=len(tried_nodes),
+        was_fallback=routing.was_fallback,
+        final_node=last_node_id,
+        status=exc_type,
+    ))
 
-    return response
+    try:
+        from orchestrator.persistence import persist_failure
+        asyncio.create_task(persist_failure(failure_response, request))
+    except Exception as _e:
+        logger.debug("[%s] persist_failure task creation failed: %s", request_id, _e)
+
+    return failure_response

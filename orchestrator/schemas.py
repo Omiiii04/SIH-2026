@@ -71,6 +71,13 @@ class RequestStatus(str, Enum):
     TIMEOUT = "timeout"
 
 
+class NodeStatus(str, Enum):
+    """Phase 5 three-state node health classification."""
+    ONLINE   = "ONLINE"
+    DEGRADED = "DEGRADED"   # reachable but high latency
+    OFFLINE  = "OFFLINE"
+
+
 class ClassifierMethod(str, Enum):
     """Which classification path was taken."""
     RULE_EXPLICIT   = "rule:explicit_input_type"
@@ -268,4 +275,37 @@ class MemorySearchResponse(BaseModel):
     query:    str
     total:    int
     results:  List[MemorySearchResult]
+
+
+# ── Phase 5: Node Status + Metrics ────────────────────────────────────────────
+
+class NodeStatusEntry(BaseModel):
+    """Phase 5 node status entry for GET /api/v1/nodes."""
+    node_id:          str
+    status:           NodeStatus
+    latency_ms:       Optional[float] = None
+    model_loaded:     Optional[str]   = None
+    last_checked:     Optional[datetime] = None
+    last_success:     Optional[datetime] = None
+
+
+class NodeStatusResponse(BaseModel):
+    """Response for GET /api/v1/nodes."""
+    nodes: List[NodeStatusEntry]
+
+
+class MetricsResponse(BaseModel):
+    """Response for GET /api/v1/metrics."""
+    total_requests:     int
+    successful:         int
+    failed:             int
+    success_rate:       float           # 0.0–1.0
+    avg_latency_ms:     Optional[float] = None
+    min_latency_ms:     Optional[float] = None
+    max_latency_ms:     Optional[float] = None
+    avg_routing_ms:     Optional[float] = None
+    avg_inference_ms:   Optional[float] = None
+    total_retries:      int = 0
+    fallback_count:     int = 0
+    window_size:        int             # how many requests are in the rolling window
 

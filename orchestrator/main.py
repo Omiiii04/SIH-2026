@@ -1,15 +1,16 @@
 """
-SIH-2026 Orchestrator — FastAPI Application Entry Point.
+SIH-2026 Orchestrator - FastAPI Application Entry Point.
 
 Routes
 ------
-  GET  /health                    → orchestrator liveness probe
-  GET  /health/cluster            → probes all worker nodes
-  GET  /api/v1/nodes              → lists the node registry
-  PATCH /api/v1/nodes/{id}/status → runtime node status override
-  POST /api/v1/query              → Phase 2/3 live inference pipeline
-  POST /api/v1/memory/search      → Phase 4 semantic memory search
-  POST /infer                     → Phase 1 stub (deprecated)
+  GET  /health                    -> orchestrator liveness probe
+  GET  /health/cluster            -> probes all worker nodes
+  GET  /api/v1/nodes              -> Phase 5 node status (ONLINE/DEGRADED/OFFLINE + latency)
+  GET  /api/v1/metrics            -> Phase 5 aggregate request metrics
+  PATCH /api/v1/nodes/{id}/status -> runtime node status override
+  POST /api/v1/query              -> Phase 2/3/5 live inference pipeline
+  POST /api/v1/memory/search      -> Phase 4 semantic memory search
+  POST /infer                     -> Phase 1 stub (deprecated)
 """
 
 from __future__ import annotations
@@ -37,32 +38,29 @@ from orchestrator.schemas import (
     MemorySearchRequest,
     MemorySearchResponse,
     MemorySearchResult,
+    MetricsResponse,
     NodeFailureResponse,
     NodeRegistryEntry,
+    NodeStatusResponse,
     NodeType,
     QueryRequest,
     QueryResponse,
     RoutingDecision,
 )
 
-# ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ── Settings ───────────────────────────────────────────────────────────────────
 cfg = get_settings()
 
 
-# ── Lifespan (startup / shutdown) ──────────────────────────────────────────────
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialise databases on startup, dispose them on shutdown."""
+    """Initialise databases and health monitor on startup, clean up on shutdown."""
 
-    # ── Startup ────────────────────────────────────────────────────────────────
     logger.info("=== SIH-2026 Orchestrator starting up ===")
 
     # PostgreSQL
@@ -71,19 +69,34 @@ async def lifespan(app: FastAPI):
         await init_db()
         logger.info("PostgreSQL: tables ready.")
     except Exception as exc:
-        logger.warning("PostgreSQL unavailable at startup: %s — persistence disabled.", exc)
+        logger.warning("PostgreSQL unavailable at startup: %s -- persistence disabled.", exc)
 
     # ChromaDB
     try:
         from database.chroma import init_chroma
         init_chroma()
     except Exception as exc:
-        logger.warning("ChromaDB unavailable at startup: %s — memory search disabled.", exc)
+        logger.warning("ChromaDB unavailable at startup: %s -- memory search disabled.", exc)
 
-    yield  # ── Application running ───────────────────────────────────────────
+    # Phase 5: start background health monitor
+    try:
+        from orchestrator.monitor import start_monitor
+        start_monitor()
+        logger.info("Phase 5: node health monitor started.")
+    except Exception as exc:
+        logger.warning("Health monitor failed to start: %s", exc)
 
-    # ── Shutdown ───────────────────────────────────────────────────────────────
+    yield
+
     logger.info("=== SIH-2026 Orchestrator shutting down ===")
+
+    # Phase 5: stop monitor
+    try:
+        from orchestrator.monitor import stop_monitor
+        stop_monitor()
+    except Exception:
+        pass
+
     try:
         from database.postgres import close_db
         await close_db()
@@ -96,7 +109,6 @@ async def lifespan(app: FastAPI):
         pass
 
 
-# ── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title=cfg.app_name,
     version=cfg.app_version,
@@ -112,22 +124,18 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ── Health routes ──────────────────────────────────────────────────────────────
+# Health routes
 
-@app.get(
-    "/health",
-    tags=["Health"],
-    summary="Orchestrator liveness probe",
-)
+@app.get("/health", tags=["Health"], summary="Orchestrator liveness probe")
 async def health_check() -> dict:
-    """Simple liveness endpoint — does NOT probe worker nodes or databases."""
+    """Simple liveness endpoint -- does NOT probe worker nodes or databases."""
     from database.postgres import ping_db
     from database.chroma import ping_chroma
 
@@ -164,18 +172,65 @@ async def cluster_health() -> ClusterHealthResponse:
     return await get_cluster_health()
 
 
-# ── Node registry routes ───────────────────────────────────────────────────────
+# Phase 5 Node status + metrics routes
 
 @app.get(
     "/api/v1/nodes",
-    tags=["Registry"],
-    summary="List all registered worker nodes",
-    response_model=List[NodeRegistryEntry],
+    tags=["Phase 5 Monitoring"],
+    summary="Node health status (ONLINE/DEGRADED/OFFLINE)",
+    response_model=NodeStatusResponse,
 )
-async def get_nodes() -> List[NodeRegistryEntry]:
-    """Returns the node registry with current status for each node."""
-    return list_nodes()
+async def get_node_statuses() -> NodeStatusResponse:
+    """
+    Returns Phase 5 three-state status for all nodes as tracked by the
+    background health monitor. Falls back to registry status if monitor
+    has not run yet.
 
+    Example response:
+        {
+          "nodes": [
+            {"node_id": "NODE-TEXT", "status": "ONLINE", "latency_ms": 320},
+            ...
+          ]
+        }
+    """
+    from orchestrator.monitor import get_node_status_entries, _NODE_STATES
+    from orchestrator.schemas import NodeStatus, NodeStatusEntry
+
+    entries = get_node_status_entries()
+
+    # If monitor hasn't populated states yet, fall back to registry
+    if not entries:
+        registry_nodes = list_nodes()
+        entries = [
+            NodeStatusEntry(
+                node_id=n.node_id,
+                status=NodeStatus.OFFLINE if n.status == "offline" else NodeStatus.ONLINE,
+                latency_ms=None,
+            )
+            for n in registry_nodes
+        ]
+
+    return NodeStatusResponse(nodes=entries)
+
+
+@app.get(
+    "/api/v1/metrics",
+    tags=["Phase 5 Monitoring"],
+    summary="Aggregate request metrics (rolling window)",
+    response_model=MetricsResponse,
+)
+async def get_metrics() -> MetricsResponse:
+    """
+    Returns aggregate statistics over the last 1000 requests:
+    latency (avg/min/max), success rate, retry count, fallback count.
+    """
+    from orchestrator.monitor import get_metrics_snapshot
+    snap = get_metrics_snapshot()
+    return MetricsResponse(**snap)
+
+
+# Node registry routes (unchanged)
 
 @app.patch(
     "/api/v1/nodes/{node_id}/status",
@@ -196,7 +251,7 @@ async def patch_node_status(node_id: str, status: str) -> dict:
     return {"node_id": node_id.upper(), "status": status}
 
 
-# ── Phase 2/3: live inference ──────────────────────────────────────────────────
+# Phase 2/3/5 live inference
 
 @app.post(
     "/api/v1/query",
@@ -212,9 +267,9 @@ async def query(request: QueryRequest) -> JSONResponse:
     Main inference endpoint.
 
     Pipeline:
-      1. Classify the query (hybrid: rules → LLM fallback)
+      1. Classify the query (hybrid: rules -> LLM fallback)
       2. Select the best available online node for the required capability
-      3. Call the LM Studio node via httpx
+      3. Call the LM Studio node via httpx (with retry up to http_max_retries)
       4. Persist result to PostgreSQL + ChromaDB (fire-and-forget)
       5. Return QueryResponse on success, NodeFailureResponse on node failure
     """
@@ -232,7 +287,7 @@ async def query(request: QueryRequest) -> JSONResponse:
     )
 
 
-# ── Phase 4: Semantic Memory Search ───────────────────────────────────────────
+# Phase 4: Semantic Memory Search
 
 @app.post(
     "/api/v1/memory/search",
@@ -246,15 +301,6 @@ async def memory_search(request: MemorySearchRequest) -> MemorySearchResponse:
 
     Uses ChromaDB cosine similarity to find the most relevant previous
     queries and responses. Only interactions from ``user_id`` are returned.
-
-    Example::
-
-        POST /api/v1/memory/search
-        {
-          "user_id": "user_001",
-          "query": "What did I ask about distributed AI?",
-          "n_results": 5
-        }
     """
     try:
         from database.chroma import search_interactions, ping_chroma
@@ -287,12 +333,12 @@ async def memory_search(request: MemorySearchRequest) -> MemorySearchResponse:
     )
 
 
-# ── Phase 1 stub (kept for backward compatibility) ─────────────────────────────
+# Phase 1 stub (kept for backward compatibility)
 
 @app.post(
     "/infer",
     tags=["Inference (Phase 1 stub)"],
-    summary="[DEPRECATED] Phase 1 routing stub — use /api/v1/query instead",
+    summary="[DEPRECATED] Phase 1 routing stub -- use /api/v1/query instead",
     response_model=InferenceResponse,
     deprecated=True,
 )
@@ -316,7 +362,6 @@ async def infer(request: InferenceRequest) -> InferenceResponse:
     )
 
 
-# ── Dev server entry-point ─────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(
         "orchestrator.main:app",
