@@ -52,12 +52,13 @@ class Settings(BaseSettings):
     chroma_collection: str = "conversation_memory"
 
     # ── Worker Nodes (LM Studio endpoints) ───────────────────────────────────
-    # Comma-separated list of base URLs, e.g. "http://192.168.1.1:1234"
-    node_text_url: str = "http://192.168.1.101:1234"
-    node_vision_url: str = "http://192.168.1.102:1234"
-    node_reasoning_url: str = "http://192.168.1.103:1234"
-    node_code_url: str = "http://192.168.1.104:1234"
-    node_rag_url: str = "http://192.168.1.105:1234"
+    # Leave empty ("") for laptops not yet provisioned — they will be treated
+    # as OFFLINE by the health checker and node tester.
+    node_text_url: str = ""
+    node_vision_url: str = ""
+    node_reasoning_url: str = ""
+    node_code_url: str = ""
+    node_rag_url: str = ""
 
     # ── HTTP Client ───────────────────────────────────────────────────────────
     http_timeout: float = 30.0        # seconds
