@@ -38,10 +38,46 @@ class InputType(str, Enum):
     RETRIEVAL = "retrieval"
 
 
+class TaskType(str, Enum):
+    """Fine-grained task category returned by the Phase 3 classifier."""
+    GENERAL_QA            = "general_qa"
+    SUMMARIZATION         = "summarization"
+    CREATIVE_WRITING      = "creative_writing"
+    CODING                = "coding"
+    CODE_DEBUG            = "code_debug"
+    CODE_REVIEW           = "code_review"
+    VISUAL_QA             = "visual_question_answering"
+    OCR                   = "ocr"
+    REASONING             = "reasoning"
+    MATH                  = "math"
+    LOGICAL_INFERENCE     = "logical_inference"
+    DOCUMENT_RETRIEVAL    = "document_retrieval"
+    SEMANTIC_SEARCH       = "semantic_search"
+    EMBEDDING             = "embedding"
+    CLASSIFICATION        = "classification"
+    UNKNOWN               = "unknown"
+
+
+class Difficulty(str, Enum):
+    """Estimated difficulty of the task."""
+    LOW    = "low"
+    MEDIUM = "medium"
+    HIGH   = "high"
+
+
 class RequestStatus(str, Enum):
     SUCCESS = "success"
     ERROR = "error"
     TIMEOUT = "timeout"
+
+
+class ClassifierMethod(str, Enum):
+    """Which classification path was taken."""
+    RULE_EXPLICIT   = "rule:explicit_input_type"
+    RULE_KEYWORD    = "rule:keyword_match"
+    RULE_DEFAULT    = "rule:default_fallback"
+    LLM             = "llm:structured_output"
+    LLM_FALLBACK    = "llm:fallback_on_rule_failure"
 
 
 # ── Inference Request / Response ───────────────────────────────────────────────
@@ -135,12 +171,26 @@ class QueryRequest(BaseModel):
 
 
 class ClassificationResult(BaseModel):
-    """Output of the input classifier — what capability is needed."""
+    """Output of the Phase 3 hybrid classifier."""
 
+    # Core fields (Phase 2 compatible)
     input_type: InputType
     node_type: NodeType
-    confidence: str = "rule-based"   # will become a float score in Phase 3
-    matched_rule: Optional[str] = None
+    matched_rule: Optional[str] = None          # which rule / keyword fired
+
+    # Phase 3 additions
+    task_type: TaskType = TaskType.UNKNOWN
+    difficulty: Difficulty = Difficulty.MEDIUM
+    required_capability: str = "text"           # matches NodeRegistryEntry.capability
+    confidence: float = 1.0                     # 0.0–1.0
+    classifier_method: ClassifierMethod = ClassifierMethod.RULE_DEFAULT
+
+
+class RoutingDecision(BaseModel):
+    """Explains why a specific node was chosen."""
+    selected_node: str
+    reason: str
+    was_fallback: bool = False    # True when the primary node was offline
 
 
 class QueryResponse(BaseModel):
@@ -151,7 +201,8 @@ class QueryResponse(BaseModel):
     session_id: Optional[str] = None
     input_type: InputType
     classification: ClassificationResult
-    selected_node: str          # node_id  e.g. "NODE-TEXT"
+    routing: RoutingDecision
+    selected_node: str          # node_id  e.g. "NODE-TEXT"  (mirrors routing.selected_node)
     selected_model: str
     response: str
     latency_ms: float
@@ -167,6 +218,7 @@ class NodeFailureResponse(BaseModel):
     error_type: str             # "connection_error" | "timeout" | "http_error" | "node_not_configured"
     detail: str
     latency_ms: float
+    routing: Optional[RoutingDecision] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

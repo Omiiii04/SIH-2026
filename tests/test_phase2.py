@@ -18,10 +18,18 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from orchestrator.classifier import classify
+from orchestrator.classifier import classify_sync as classify
 from orchestrator.lm_client import LMClientError, LMResponse
 from orchestrator.main import app
+from orchestrator.node_registry import reset_registry, set_node_status
 from orchestrator.schemas import InputType, NodeType, QueryRequest
+
+
+@pytest.fixture(autouse=True)
+def fresh_registry():
+    reset_registry()
+    yield
+    reset_registry()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -129,6 +137,7 @@ class TestRouter:
 
     @pytest.mark.asyncio
     async def test_text_query_selects_node_text(self):
+        set_node_status("NODE-TEXT", "online")
         req = QueryRequest(user_id="u1", query="Explain transformers", input_type=InputType.TEXT)
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response()
@@ -141,6 +150,7 @@ class TestRouter:
 
     @pytest.mark.asyncio
     async def test_image_query_selects_node_vision(self):
+        set_node_status("NODE-VISION", "online")
         req = QueryRequest(user_id="u1", query="describe this photo", input_type=InputType.IMAGE)
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response("I see a cat.")
@@ -153,6 +163,7 @@ class TestRouter:
 
     @pytest.mark.asyncio
     async def test_code_query_selects_node_code(self):
+        set_node_status("NODE-CODE", "online")
         req = QueryRequest(user_id="u1", query="write a python function", input_type=InputType.TEXT)
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response("def my_func(): pass")
@@ -165,6 +176,7 @@ class TestRouter:
 
     @pytest.mark.asyncio
     async def test_reasoning_query_selects_node_reasoning(self):
+        set_node_status("NODE-REASONING", "online")
         req = QueryRequest(user_id="u1", query="analyse why the economy collapsed step by step", input_type=InputType.TEXT)
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response("Step 1...")
@@ -178,6 +190,7 @@ class TestRouter:
     @pytest.mark.asyncio
     async def test_node_failure_returns_node_failure_response(self):
         """When call_node raises LMClientError, router returns NodeFailureResponse."""
+        set_node_status("NODE-TEXT", "online")
         req = QueryRequest(user_id="u1", query="Explain transformers", input_type=InputType.TEXT)
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.side_effect = LMClientError(
@@ -196,6 +209,7 @@ class TestRouter:
 
     @pytest.mark.asyncio
     async def test_timeout_error_returns_node_failure_response(self):
+        set_node_status("NODE-TEXT", "online")
         req = QueryRequest(user_id="u1", query="Explain transformers", input_type=InputType.TEXT)
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.side_effect = LMClientError(
@@ -212,6 +226,7 @@ class TestRouter:
 
     @pytest.mark.asyncio
     async def test_response_contains_request_id(self):
+        set_node_status("NODE-TEXT", "online")
         req = QueryRequest(user_id="u1", query="hello world", input_type=InputType.TEXT)
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response()
@@ -239,6 +254,7 @@ class TestQueryEndpoint:
 
     @pytest.mark.asyncio
     async def test_text_query_returns_200(self, client):
+        set_node_status("NODE-TEXT", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response("Transformers use attention mechanisms.")
             resp = await _post_query(client, {
@@ -255,6 +271,7 @@ class TestQueryEndpoint:
 
     @pytest.mark.asyncio
     async def test_image_query_returns_200_and_selects_vision(self, client):
+        set_node_status("NODE-VISION", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response("I see a mountain.")
             resp = await _post_query(client, {
@@ -268,6 +285,7 @@ class TestQueryEndpoint:
 
     @pytest.mark.asyncio
     async def test_code_query_returns_200_and_selects_code(self, client):
+        set_node_status("NODE-CODE", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response("def reverse(s): return s[::-1]")
             resp = await _post_query(client, {
@@ -281,6 +299,7 @@ class TestQueryEndpoint:
 
     @pytest.mark.asyncio
     async def test_reasoning_query_selects_reasoning_node(self, client):
+        set_node_status("NODE-REASONING", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response("Step 1: Consider the premises...")
             resp = await _post_query(client, {
@@ -295,6 +314,7 @@ class TestQueryEndpoint:
     @pytest.mark.asyncio
     async def test_node_unavailable_returns_503(self, client):
         """When call_node fails, the endpoint must return 503 — not 500."""
+        set_node_status("NODE-TEXT", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.side_effect = LMClientError(
                 error_type="connection_error",
@@ -316,6 +336,7 @@ class TestQueryEndpoint:
     @pytest.mark.asyncio
     async def test_response_shape_is_complete(self, client):
         """QueryResponse must have all required fields."""
+        set_node_status("NODE-TEXT", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response("Hello!")
             resp = await _post_query(client, {
@@ -326,13 +347,14 @@ class TestQueryEndpoint:
 
         body = resp.json()
         required = {"request_id", "user_id", "selected_node", "selected_model",
-                    "response", "latency_ms", "classification", "input_type"}
+                    "response", "latency_ms", "classification", "input_type", "routing"}
         missing = required - body.keys()
         assert not missing, f"Missing fields: {missing}"
 
     @pytest.mark.asyncio
     async def test_classification_block_in_response(self, client):
         """The classification sub-object must include node_type and matched_rule."""
+        set_node_status("NODE-CODE", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response()
             resp = await _post_query(client, {
@@ -348,6 +370,7 @@ class TestQueryEndpoint:
 
     @pytest.mark.asyncio
     async def test_latency_is_positive_number(self, client):
+        set_node_status("NODE-TEXT", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm_response()
             resp = await _post_query(client, {

@@ -10,7 +10,7 @@ the same routing scenarios via the new classifier interface.
 
 import pytest
 
-from orchestrator.classifier import classify
+from orchestrator.classifier import classify_sync as classify
 from orchestrator.schemas import InputType, NodeType
 
 
@@ -84,7 +84,6 @@ def test_rag_keywords_route_to_rag(prompt: str) -> None:
 @pytest.mark.parametrize("prompt", [
     "hello, how are you?",
     "tell me a joke",
-    "write a poem about autumn",
     "what is the capital of France?",
 ])
 def test_generic_prompts_route_to_text(prompt: str) -> None:

@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse
 
 from orchestrator.config import get_settings
 from orchestrator.health import get_cluster_health
-from orchestrator.node_registry import list_nodes
+from orchestrator.node_registry import list_nodes, set_node_status
 from orchestrator.router import handle_query
 from orchestrator.schemas import (
     ClusterHealthResponse,
@@ -36,6 +36,7 @@ from orchestrator.schemas import (
     NodeType,
     QueryRequest,
     QueryResponse,
+    RoutingDecision,
 )
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -105,12 +106,27 @@ async def cluster_health() -> ClusterHealthResponse:
     response_model=List[NodeRegistryEntry],
 )
 async def get_nodes() -> List[NodeRegistryEntry]:
-    """
-    Returns the static node registry.
-    Each entry shows node_id, capability, endpoint, model, supported_input_types,
-    priority, and current status.
-    """
+    """Returns the node registry with current status for each node."""
     return list_nodes()
+
+
+@app.patch(
+    "/api/v1/nodes/{node_id}/status",
+    tags=["Registry"],
+    summary="Update the runtime status of a node",
+)
+async def patch_node_status(node_id: str, status: str) -> dict:
+    """
+    Manually set a node's status to 'online', 'offline', 'unknown', or
+    'not_configured'. Useful for testing fallback routing without shutting
+    down a physical laptop.
+
+    Example: PATCH /api/v1/nodes/NODE-CODE/status?status=offline
+    """
+    ok = set_node_status(node_id.upper(), status)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found.")
+    return {"node_id": node_id.upper(), "status": status}
 
 
 # ── Phase 2: live inference ────────────────────────────────────────────────────
@@ -159,11 +175,11 @@ async def query(request: QueryRequest) -> JSONResponse:
 )
 async def infer(request: InferenceRequest) -> InferenceResponse:
     """Retained for backward compatibility. Prefer POST /api/v1/query."""
-    from orchestrator.classifier import classify
+    from orchestrator.classifier import classify_sync
     from orchestrator.schemas import InputType
     from orchestrator.node_registry import get_node_by_type
 
-    classification = classify(request.prompt, InputType.TEXT)
+    classification = classify_sync(request.prompt, InputType.TEXT)
     node = get_node_by_type(classification.node_type)
     node_url = node.endpoint if node else ""
 
