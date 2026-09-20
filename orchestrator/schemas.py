@@ -236,3 +236,36 @@ class NodeRegistryEntry(BaseModel):
     status: str                 # "online" | "offline" | "not_configured"
     supported_input_types: List[str]
     priority: int               # lower = higher priority (1 = primary)
+
+
+# ── Phase 4: Semantic Memory ───────────────────────────────────────────────────
+
+class MemorySearchRequest(BaseModel):
+    """Request body for POST /api/v1/memory/search."""
+
+    user_id:   str = Field(..., min_length=1, description="Caller identifier.")
+    query:     str = Field(..., min_length=1, description="Natural-language search query.")
+    n_results: int = Field(default=5, ge=1, le=20, description="Max results to return.")
+
+
+class MemorySearchResult(BaseModel):
+    """One past interaction returned by the semantic memory search."""
+
+    request_id: str
+    query:      str
+    response:   str
+    node_id:    str
+    model:      str
+    timestamp:  str
+    session_id: str = ""
+    score:      float = Field(description="Cosine similarity score (0–1, higher = more relevant).")
+
+
+class MemorySearchResponse(BaseModel):
+    """Response envelope for POST /api/v1/memory/search."""
+
+    user_id:  str
+    query:    str
+    total:    int
+    results:  List[MemorySearchResult]
+

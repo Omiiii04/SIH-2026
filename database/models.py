@@ -1,4 +1,6 @@
 """
+database/models.py
+──────────────────
 Re-exports ORM models for convenient database-layer imports.
 
 Importing from ``database.models`` gives access to both the SQLAlchemy
@@ -8,14 +10,20 @@ directly (which lives in a different package layer).
 
 from orchestrator.models import (  # noqa: F401  (re-export)
     Base,
-    ConversationSession,
     NodeHealth,
-    RequestLog,
+    Request,
+    RoutingDecision,
+    User,
 )
+
+# Backward-compatible alias used by older code / tests
+RequestLog = Request
 
 __all__ = [
     "Base",
-    "RequestLog",
+    "User",
+    "Request",
+    "RequestLog",   # alias
+    "RoutingDecision",
     "NodeHealth",
-    "ConversationSession",
 ]

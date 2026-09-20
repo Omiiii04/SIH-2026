@@ -26,6 +26,7 @@ Key Phase 3 additions:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import Union
@@ -198,7 +199,7 @@ async def handle_query(
             set_node_status(node.node_id, "offline")
             logger.info("[%s] Marked %s as offline in registry", request_id, node.node_id)
 
-        return NodeFailureResponse(
+        failure_response = NodeFailureResponse(
             request_id=request_id,
             user_id=request.user_id,
             selected_node=node.node_id,
@@ -207,6 +208,13 @@ async def handle_query(
             latency_ms=exc.latency_ms,
             routing=routing,
         )
+        try:
+            from orchestrator.persistence import persist_failure
+            asyncio.create_task(persist_failure(failure_response, request))
+        except Exception as _persist_exc:
+            logger.debug("[%s] persist_failure task creation failed: %s", request_id, _persist_exc)
+
+        return failure_response
 
     # ── Step 4: Build response ────────────────────────────────────────────────
     logger.info(
@@ -214,7 +222,7 @@ async def handle_query(
         request_id, node.node_id, lm_resp.latency_ms, lm_resp.tokens_total,
     )
 
-    return QueryResponse(
+    response = QueryResponse(
         request_id=request_id,
         user_id=request.user_id,
         session_id=request.session_id,
@@ -226,3 +234,12 @@ async def handle_query(
         response=lm_resp.content,
         latency_ms=lm_resp.latency_ms,
     )
+
+    # ── Step 5: Persist (fire-and-forget, never blocks response) ─────────
+    try:
+        from orchestrator.persistence import persist_success
+        asyncio.create_task(persist_success(response, request))
+    except Exception as _persist_exc:
+        logger.debug("[%s] persist_success task creation failed: %s", request_id, _persist_exc)
+
+    return response

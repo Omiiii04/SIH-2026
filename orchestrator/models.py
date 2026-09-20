@@ -1,11 +1,20 @@
 """
-SQLAlchemy ORM models for the SIH-2026 Orchestrator.
+orchestrator/models.py
+──────────────────────
+SQLAlchemy 2.x ORM models for the SIH-2026 Phase 4 persistence layer.
 
-These map to the PostgreSQL tables used for:
-  - Request logging
-  - Node registry / health snapshots
-  - Conversation session metadata
+Tables
+------
+  users            — unique caller identities
+  requests         — one row per routed query (structured source of truth)
+  routing_decisions — one row per successful routing decision (FK → requests)
+  node_health      — rolling node health snapshots (upserted per node_id)
+
+All timestamps are UTC-naive to stay consistent with PostgreSQL's
+timestamptz-less TIMESTAMP type used by default.
 """
+
+from __future__ import annotations
 
 import uuid
 from datetime import datetime
@@ -15,56 +24,126 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
-    Integer,
+    ForeignKey,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, relationship
 
 
 class Base(DeclarativeBase):
     """Shared declarative base for all ORM models."""
 
 
-class RequestLog(Base):
+# ─────────────────────────────────────────────────────────────────────────────
+# users
+# ─────────────────────────────────────────────────────────────────────────────
+
+class User(Base):
+    """Unique caller identity — created on first query from that user_id."""
+
+    __tablename__ = "users"
+
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id    = Column(String(128), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    requests = relationship("Request", back_populates="user", lazy="noload")
+
+    def __repr__(self) -> str:
+        return f"<User user_id={self.user_id!r}>"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# requests
+# ─────────────────────────────────────────────────────────────────────────────
+
+class Request(Base):
     """Records every inference request routed through the orchestrator."""
 
-    __tablename__ = "request_logs"
+    __tablename__ = "requests"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(String(64), nullable=True, index=True)
-    node_type = Column(String(32), nullable=False)          # text | vision | reasoning | code | rag
-    node_url = Column(String(256), nullable=False)
-    prompt_preview = Column(Text, nullable=True)            # first 256 chars of prompt
-    status = Column(String(16), nullable=False)             # success | error | timeout
-    latency_ms = Column(Float, nullable=True)
-    tokens_used = Column(Integer, nullable=True)
-    error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id        = Column(String(128), ForeignKey("users.user_id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    session_id     = Column(String(128), nullable=True, index=True)
+    query          = Column(Text,        nullable=False)
+    input_type     = Column(String(32),  nullable=False)   # text | image | code | reasoning | retrieval
+    task_type      = Column(String(64),  nullable=True)    # from Phase 3 classifier
+    difficulty     = Column(String(16),  nullable=True)    # low | medium | high
+    selected_node  = Column(String(64),  nullable=True)    # e.g. NODE-CODE
+    selected_model = Column(String(256), nullable=True)    # model name from LM Studio
+    status         = Column(String(16),  nullable=False, default="success")  # success | error | timeout
+    latency_ms     = Column(Float,       nullable=True)
+    created_at     = Column(DateTime,    default=datetime.utcnow, nullable=False, index=True)
 
+    user             = relationship("User",            back_populates="requests", lazy="noload")
+    routing_decision = relationship("RoutingDecision", back_populates="request",  lazy="noload",
+                                    uselist=False)
+
+    def __repr__(self) -> str:
+        return f"<Request id={self.id} node={self.selected_node!r} status={self.status!r}>"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# routing_decisions
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RoutingDecision(Base):
+    """Stores the routing metadata for each successful request."""
+
+    __tablename__ = "routing_decisions"
+
+    id                   = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    request_id           = Column(UUID(as_uuid=True), ForeignKey("requests.id", ondelete="CASCADE"),
+                                  nullable=False, unique=True, index=True)
+    required_capability  = Column(String(64),  nullable=True)
+    selected_node        = Column(String(64),  nullable=False)
+    reason               = Column(Text,        nullable=True)
+    confidence           = Column(Float,       nullable=True)
+    was_fallback         = Column(Boolean,     nullable=False, default=False)
+    created_at           = Column(DateTime,    default=datetime.utcnow, nullable=False)
+
+    request = relationship("Request", back_populates="routing_decision", lazy="noload")
+
+    def __repr__(self) -> str:
+        return (
+            f"<RoutingDecision request_id={self.request_id} "
+            f"node={self.selected_node!r} fallback={self.was_fallback}>"
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# node_health
+# ─────────────────────────────────────────────────────────────────────────────
 
 class NodeHealth(Base):
-    """Snapshot of a worker node's health at a point in time."""
+    """
+    Rolling health snapshot — upserted on each health check or when a node
+    goes offline due to a failed inference call.
+
+    One row per node_id (unique constraint enforced).
+    """
 
     __tablename__ = "node_health"
+    __table_args__ = (UniqueConstraint("node_id", name="uq_node_health_node_id"),)
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    node_type = Column(String(32), nullable=False, index=True)
-    node_url = Column(String(256), nullable=False)
-    is_online = Column(Boolean, nullable=False, default=False)
-    latency_ms = Column(Float, nullable=True)
-    model_loaded = Column(String(256), nullable=True)       # model name reported by LM Studio
-    checked_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    node_id    = Column(String(64),  nullable=False, index=True)
+    status     = Column(String(16),  nullable=False, default="unknown")  # online | offline | unknown
+    latency_ms = Column(Float,       nullable=True)
+    last_seen  = Column(DateTime,    default=datetime.utcnow, nullable=False, onupdate=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<NodeHealth node={self.node_id!r} status={self.status!r}>"
 
 
-class ConversationSession(Base):
-    """Tracks multi-turn conversation sessions."""
+# ─────────────────────────────────────────────────────────────────────────────
+# Backward-compat re-export used by database/models.py
+# ─────────────────────────────────────────────────────────────────────────────
 
-    __tablename__ = "conversation_sessions"
-
-    id = Column(String(64), primary_key=True)               # client-supplied or generated UUID str
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    turn_count = Column(Integer, default=0, nullable=False)
-    metadata_ = Column("metadata", Text, nullable=True)     # JSON blob for arbitrary session data
+# Legacy names kept so existing re-export in database/models.py doesn't break
+RequestLog = Request
+ConversationSession = None  # removed in Phase 4; use requests + session_id column
