@@ -48,8 +48,47 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Force dark theme always */
 :root {
+  --background: oklch(0.98 0 0);
+  --foreground: oklch(0.14 0.05 285);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.14 0.05 285);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.14 0.05 285);
+  --primary: oklch(0.65 0.22 265);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.96 0.01 285);
+  --secondary-foreground: oklch(0.20 0.05 285);
+  --muted: oklch(0.96 0.01 285);
+  --muted-foreground: oklch(0.55 0.02 285);
+  --accent: oklch(0.96 0.01 285);
+  --accent-foreground: oklch(0.20 0.05 285);
+  --destructive: oklch(0.60 0.22 27);
+  --border: oklch(0 0 0 / 8%);
+  --input: oklch(0 0 0 / 8%);
+  --ring: oklch(0.65 0.22 265);
+  --chart-1: oklch(0.65 0.22 265);
+  --chart-2: oklch(0.65 0.22 165);
+  --chart-3: oklch(0.65 0.22 65);
+  --chart-4: oklch(0.65 0.22 320);
+  --chart-5: oklch(0.65 0.22 27);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.98 0 0);
+  --sidebar-foreground: oklch(0.14 0.05 285);
+  --sidebar-primary: oklch(0.65 0.22 265);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.96 0.01 285);
+  --sidebar-accent-foreground: oklch(0.14 0.05 285);
+  --sidebar-border: oklch(0 0 0 / 8%);
+  --sidebar-ring: oklch(0.65 0.22 265);
+  
+  /* Node status colors */
+  --online: oklch(0.7 0.22 145);
+  --degraded: oklch(0.78 0.18 65);
+  --offline: oklch(0.65 0.22 27);
+}
+
+.dark {
   --background: oklch(0.1 0.01 265);
   --foreground: oklch(0.97 0 0);
   --card: oklch(0.15 0.01 265);
@@ -73,7 +112,6 @@
   --chart-3: oklch(0.65 0.22 65);
   --chart-4: oklch(0.65 0.22 320);
   --chart-5: oklch(0.65 0.22 27);
-  --radius: 0.625rem;
   --sidebar: oklch(0.12 0.01 265);
   --sidebar-foreground: oklch(0.97 0 0);
   --sidebar-primary: oklch(0.65 0.22 265);
@@ -82,10 +120,6 @@
   --sidebar-accent-foreground: oklch(0.97 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.65 0.22 265);
-  /* Node status colors */
-  --online: oklch(0.7 0.22 145);
-  --degraded: oklch(0.78 0.18 65);
-  --offline: oklch(0.65 0.22 27);
 }
 
 @layer base {
