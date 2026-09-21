@@ -101,7 +101,11 @@ export default function DashboardPage() {
       footer={<NodeStatusBar />}
     >
       <div className="flex flex-col h-full relative">
-        <ChatContainer messages={messages} loading={loading} />
+        <ChatContainer 
+          messages={messages} 
+          loading={loading} 
+          onExampleClick={(query, type) => handleSend(query, type, null)} 
+        />
         
         {/* Composer fixed at bottom of chat area */}
         <div className="sticky bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-background via-background to-transparent pt-10 mt-auto">

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
+import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, ImagePlus, X, Loader2, Plus, Type, Code, Brain, Database } from "lucide-react";
+import { Send, Loader2, Plus, Type, Code, Brain, Database, Paperclip, File as FileIcon, Image as ImageIcon, X } from "lucide-react";
 
 const INPUT_TYPES = [
   { value: "text",      label: "Text",      icon: Type },
@@ -20,36 +21,54 @@ interface Props {
 export function ChatComposer({ onSend, loading }: Props) {
   const [query, setQuery]           = useState("");
   const [inputType, setInputType]   = useState("text");
-  const [imageFile, setImageFile]   = useState<File | null>(null);
   const [menuOpen, setMenuOpen]     = useState(false);
-  const fileRef                     = useRef<HTMLInputElement>(null);
+  const [file, setFile]             = useState<File | null>(null);
+  const fileInputRef                = useRef<HTMLInputElement>(null);
 
   function handleSubmit(e?: React.FormEvent) {
     if (e) e.preventDefault();
-    if (!query.trim() || loading) return;
-    onSend(query.trim(), inputType, imageFile);
+    if (!query.trim() && !file) return;
+    if (loading) return;
+    
+    onSend(query.trim(), inputType, file);
     setQuery("");
-    setImageFile(null);
     setInputType("text");
+    setMenuOpen(false);
+    setFile(null);
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files && e.target.files[0]) {
+      setFile(e.target.files[0]);
+    }
     setMenuOpen(false);
   }
 
   const selectedType = INPUT_TYPES.find(t => t.value === inputType) || INPUT_TYPES[0];
 
   return (
-    <div className="relative bg-card border border-border/60 rounded-2xl p-2 shadow-sm focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 transition-all flex flex-col gap-2">
-      {/* Attached image preview */}
-      {imageFile && (
-        <div className="flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-lg px-3 py-1.5 text-xs text-primary w-fit ml-12">
-          <ImagePlus size={13} />
-          <span className="truncate max-w-[200px]">{imageFile.name}</span>
-          <button type="button" onClick={() => setImageFile(null)}>
-            <X size={13} className="hover:text-red-400" />
+    <div className="relative bg-card border border-border/60 rounded-2xl shadow-sm focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 transition-all flex flex-col gap-1">
+      {file && (
+        <div className="flex items-center gap-2 p-2 mx-2 mt-2 bg-muted/50 rounded-lg text-xs border border-border/50 animate-in fade-in zoom-in-95">
+          {file.type.startsWith("image/") ? (
+            <div className="w-8 h-8 rounded bg-background border border-border flex items-center justify-center overflow-hidden shrink-0">
+              <img src={URL.createObjectURL(file)} alt="preview" className="object-cover w-full h-full" />
+            </div>
+          ) : (
+            <div className="w-8 h-8 rounded bg-background border border-border flex items-center justify-center shrink-0">
+              <FileIcon size={14} className="text-muted-foreground" />
+            </div>
+          )}
+          <span className="truncate font-medium flex-1">{file.name}</span>
+          <button onClick={() => setFile(null)} className="text-muted-foreground hover:text-foreground shrink-0 p-1" aria-label="Remove attachment">
+            <X size={14} />
           </button>
         </div>
       )}
-
-      <div className="flex items-end gap-2">
+      
+      <div className="flex items-end gap-2 p-2">
+        <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileSelect} />
+        
         {/* Plus Menu Button */}
         <div className="relative">
           <Button
@@ -66,6 +85,29 @@ export function ChatComposer({ onSend, loading }: Props) {
           {/* Popover Menu */}
           {menuOpen && (
             <div className="absolute bottom-full left-0 mb-2 w-48 bg-card border border-border rounded-xl shadow-lg p-1.5 flex flex-col gap-0.5 z-10 animate-in fade-in zoom-in-95 origin-bottom-left">
+              <div className="px-2 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+                Attach
+              </div>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors hover:bg-muted text-foreground"
+              >
+                <ImageIcon size={14} /> Upload image
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors hover:bg-muted text-foreground mb-1"
+              >
+                <FileIcon size={14} /> Upload file
+              </button>
+              
+              <div className="border-t border-border/50 my-1"></div>
+              
+              <div className="px-2 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+                Input Mode
+              </div>
               {INPUT_TYPES.map((t) => (
                 <button
                   key={t.value}
@@ -77,15 +119,6 @@ export function ChatComposer({ onSend, loading }: Props) {
                   {t.label}
                 </button>
               ))}
-              <div className="h-px bg-border my-1" />
-              <button
-                type="button"
-                onClick={() => { fileRef.current?.click(); setMenuOpen(false); }}
-                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm hover:bg-muted text-foreground transition-colors"
-              >
-                <ImagePlus size={14} />
-                Upload Image
-              </button>
             </div>
           )}
         </div>
@@ -112,26 +145,13 @@ export function ChatComposer({ onSend, loading }: Props) {
         <Button
           type="button"
           size="icon"
-          disabled={!query.trim() || loading}
+          disabled={(!query.trim() && !file) || loading}
           onClick={() => handleSubmit()}
           className="h-9 w-9 rounded-xl bg-primary text-primary-foreground shrink-0 shadow-sm"
         >
           {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
         </Button>
       </div>
-
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) { setImageFile(f); setInputType("image"); }
-          // Reset value to allow selecting same file again
-          e.target.value = '';
-        }}
-      />
     </div>
   );
 }

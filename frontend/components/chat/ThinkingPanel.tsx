@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { QueryResponse, NodeFailureResponse } from "@/lib/types";
-import { ChevronDown, ChevronRight, Server, Zap, BrainCircuit, Activity, AlertTriangle, ArrowRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Server, Zap, BrainCircuit, Activity, AlertTriangle, ArrowRight, CornerDownRight } from "lucide-react";
 
 interface ThinkingPanelProps {
   result: QueryResponse | NodeFailureResponse;
@@ -37,7 +37,7 @@ export function ThinkingPanel({ result, ok }: ThinkingPanelProps) {
       </button>
 
       {expanded && (
-        <div className="mt-2 text-xs border border-border/60 bg-card rounded-xl p-4 shadow-sm animate-in fade-in slide-in-from-top-2 flex flex-col gap-4">
+        <div className="mt-2 text-xs border border-border/60 bg-card rounded-xl p-4 shadow-sm animate-in fade-in slide-in-from-top-2 flex flex-col gap-6">
           
           {/* Status Banner */}
           {isFailure && (
@@ -50,14 +50,34 @@ export function ThinkingPanel({ result, ok }: ThinkingPanelProps) {
             </div>
           )}
 
-          {/* Fallback / Routing */}
-          {routing && routing.was_fallback && (
-            <div className="bg-orange-500/10 border border-orange-500/20 text-orange-400 rounded-lg p-3 flex flex-col gap-1.5">
-              <div className="font-semibold flex items-center gap-1.5"><ArrowRight size={14} /> Fallback Triggered</div>
-              <div><span className="opacity-70">Reason:</span> {routing.reason}</div>
-              <div><span className="opacity-70">Selected Node:</span> {routing.selected_node}</div>
+          {/* New Routing Flow Visualization */}
+          <div className="flex flex-col gap-3">
+            <h4 className="font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              <ArrowRight size={12} /> Routing Path
+            </h4>
+            <div className="flex flex-col text-[11px] font-mono pl-2 border-l border-border/50 ml-2 py-1 gap-1.5">
+              <div className="flex items-center gap-2 text-muted-foreground"><CornerDownRight size={12}/> User Query</div>
+              <div className="flex items-center gap-2 text-muted-foreground"><CornerDownRight size={12}/> Router</div>
+              
+              {routing && routing.was_fallback ? (
+                <>
+                  <div className="flex items-center gap-2 text-orange-400"><CornerDownRight size={12}/> {routing.selected_node} (Initial)</div>
+                  <div className="flex items-center gap-2 text-orange-400"><CornerDownRight size={12}/> {routing.reason}</div>
+                  <div className="flex items-center gap-2 text-orange-400"><CornerDownRight size={12}/> Fallback triggered</div>
+                  <div className="flex items-center gap-2 text-primary"><CornerDownRight size={12}/> {node} (Final)</div>
+                </>
+              ) : (
+                <div className="flex items-center gap-2 text-primary"><CornerDownRight size={12}/> {node}</div>
+              )}
+              
+              {model && <div className="flex items-center gap-2 text-primary"><CornerDownRight size={12}/> {model}</div>}
+              {isFailure ? (
+                <div className="flex items-center gap-2 text-red-400"><CornerDownRight size={12}/> Failed</div>
+              ) : (
+                <div className="flex items-center gap-2 text-green-500"><CornerDownRight size={12}/> Response Delivered</div>
+              )}
             </div>
-          )}
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Classification */}
@@ -81,7 +101,7 @@ export function ThinkingPanel({ result, ok }: ThinkingPanelProps) {
             <div className="flex flex-col gap-2">
               <h4 className="font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5"><Activity size={12} /> Execution</h4>
               <div className="grid grid-cols-2 gap-x-2 gap-y-1">
-                <span className="opacity-70">Node</span>
+                <span className="opacity-70">Final Node</span>
                 <span className="font-mono text-primary flex items-center gap-1"><Server size={10} />{node}</span>
                 {model && (
                   <>
