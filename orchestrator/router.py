@@ -72,17 +72,14 @@ def _build_routing_reason(
     preferred_node_id: str,
     was_fallback: bool,
 ) -> str:
-    base = _TASK_REASON.get(cls.task_type, "Routing to the best available node.")
-    qualifier = _DIFFICULTY_QUALIFIER.get(cls.difficulty, "")
-    method_note = (
-        f" (classified by {cls.classifier_method.value}, confidence={cls.confidence:.0%})"
-    )
+    method = cls.classifier_method.value
+    rule = cls.matched_rule or "unknown"
+    reason = f"Routed by {method} (rule: {rule})."
+    
     if was_fallback:
-        return (
-            base + qualifier + method_note
-            + f" Primary node {preferred_node_id} is offline; falling back to {node_id}."
-        )
-    return base + qualifier + method_note
+        reason += f" Primary node {preferred_node_id} is offline; falling back to {node_id}."
+        
+    return reason
 
 
 def _build_routing_decision(
@@ -124,8 +121,9 @@ async def handle_query(
     )
 
     # Step 1: classify
+    t_class_start = time.monotonic()
     cls: ClassificationResult = await classify(request.query, request.input_type)
-    routing_ms = (time.monotonic() - t_start) * 1000
+    classification_ms = (time.monotonic() - t_class_start) * 1000
 
     logger.info(
         "[%s] Classified -> task=%s  capability=%s  difficulty=%s  confidence=%.2f  method=%s",
@@ -199,6 +197,7 @@ async def handle_query(
         # Success
         inference_ms = (time.monotonic() - t_call_start) * 1000
         total_ms     = (time.monotonic() - t_start) * 1000
+        routing_ms   = total_ms - inference_ms - classification_ms
 
         logger.info(
             "[%s] Success  node=%s  latency=%.1f ms  tokens=%s",
@@ -215,7 +214,10 @@ async def handle_query(
             selected_node=node.node_id,
             selected_model=lm_resp.model,
             response=lm_resp.content,
-            latency_ms=lm_resp.latency_ms,
+            total_ms=round(total_ms, 1),
+            classification_ms=round(classification_ms, 1),
+            routing_ms=round(routing_ms, 1),
+            inference_ms=round(inference_ms, 1),
         )
 
         record_request(RequestRecord(
@@ -239,6 +241,8 @@ async def handle_query(
 
     # All retries exhausted
     total_ms = (time.monotonic() - t_start) * 1000
+    exc_lat = last_exc.latency_ms if last_exc else 0.0
+    routing_ms = total_ms - exc_lat - classification_ms
     if routing is None:
         routing = RoutingDecision(
             selected_node=preferred_node_id,
@@ -258,7 +262,10 @@ async def handle_query(
         selected_node=last_node_id,
         error_type=exc_type,
         detail=exc_detail,
-        latency_ms=exc_lat,
+        total_ms=round(total_ms, 1),
+        classification_ms=round(classification_ms, 1),
+        routing_ms=round(routing_ms, 1),
+        inference_ms=round(exc_lat, 1),
         routing=routing,
     )
 

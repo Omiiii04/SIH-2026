@@ -187,9 +187,9 @@ class ClassificationResult(BaseModel):
 
     # Phase 3 additions
     task_type: TaskType = TaskType.UNKNOWN
-    difficulty: Difficulty = Difficulty.MEDIUM
+    difficulty: Difficulty = Field(default=Difficulty.MEDIUM, exclude=True)
     required_capability: str = "text"           # matches NodeRegistryEntry.capability
-    confidence: float = 1.0                     # 0.0–1.0
+    confidence: float = Field(default=1.0, exclude=True)                     # 0.0–1.0
     classifier_method: ClassifierMethod = ClassifierMethod.RULE_DEFAULT
 
 
@@ -212,7 +212,10 @@ class QueryResponse(BaseModel):
     selected_node: str          # node_id  e.g. "NODE-TEXT"  (mirrors routing.selected_node)
     selected_model: str
     response: str
-    latency_ms: float
+    total_ms: float
+    classification_ms: float
+    routing_ms: float
+    inference_ms: float
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -224,7 +227,10 @@ class NodeFailureResponse(BaseModel):
     selected_node: str
     error_type: str             # "connection_error" | "timeout" | "http_error" | "node_not_configured"
     detail: str
-    latency_ms: float
+    total_ms: float
+    classification_ms: float
+    routing_ms: float
+    inference_ms: float
     routing: Optional[RoutingDecision] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

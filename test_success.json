@@ -1,0 +1,27 @@
+{
+  "request_id": "ff24dc21-90ec-479d-bc6e-addf75ab8761",
+  "user_id": "test",
+  "session_id": null,
+  "input_type": "text",
+  "classification": {
+    "input_type": "text",
+    "node_type": "reasoning",
+    "matched_rule": "math_keywords:calculate",
+    "task_type": "math",
+    "required_capability": "reasoning",
+    "classifier_method": "rule:keyword_match"
+  },
+  "routing": {
+    "selected_node": "NODE-1",
+    "reason": "Routed by rule:keyword_match (rule: math_keywords:calculate). Primary node NODE-3 is offline; falling back to NODE-1.",
+    "was_fallback": true
+  },
+  "selected_node": "NODE-1",
+  "selected_model": "google/gemma-4-e4b",
+  "response": "$125 \\times 42 = 5,250$",
+  "total_ms": 31241.9,
+  "classification_ms": 0.0,
+  "routing_ms": 21105.7,
+  "inference_ms": 10136.2,
+  "created_at": "2026-09-21T20:57:42.658910Z"
+}

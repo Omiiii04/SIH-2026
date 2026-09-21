@@ -16,7 +16,9 @@ export function ThinkingPanel({ result, ok }: ThinkingPanelProps) {
   const data = result as QueryResponse;
   const failData = result as NodeFailureResponse;
 
-  const latency = result.latency_ms;
+  const total_ms = result.total_ms ?? (result as any).latency_ms ?? 0;
+  const routing_ms = result.routing_ms ?? 0;
+  const inference_ms = result.inference_ms ?? 0;
   const node = result.selected_node;
   const model = ok ? data.selected_model : undefined;
   const routing = result.routing;
@@ -30,9 +32,9 @@ export function ThinkingPanel({ result, ok }: ThinkingPanelProps) {
       >
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         {isFailure ? (
-          <span className="text-red-400 font-medium">Failed after {latency.toFixed(0)}ms</span>
+          <span className="text-red-400 font-medium">Failed after {total_ms.toFixed(0)}ms</span>
         ) : (
-          <span>Thinking <span className="opacity-50">({latency.toFixed(0)}ms)</span></span>
+          <span>Thinking <span className="opacity-50">({total_ms.toFixed(0)}ms)</span></span>
         )}
       </button>
 
@@ -57,14 +59,14 @@ export function ThinkingPanel({ result, ok }: ThinkingPanelProps) {
             </h4>
             <div className="flex flex-col text-[11px] font-mono pl-2 border-l border-border/50 ml-2 py-1 gap-1.5">
               <div className="flex items-center gap-2 text-muted-foreground"><CornerDownRight size={12}/> User Query</div>
+              <div className="flex items-center gap-2 text-muted-foreground"><CornerDownRight size={12}/> Classifier</div>
               <div className="flex items-center gap-2 text-muted-foreground"><CornerDownRight size={12}/> Router</div>
               
               {routing && routing.was_fallback ? (
                 <>
-                  <div className="flex items-center gap-2 text-orange-400"><CornerDownRight size={12}/> {routing.selected_node} (Initial)</div>
-                  <div className="flex items-center gap-2 text-orange-400"><CornerDownRight size={12}/> {routing.reason}</div>
-                  <div className="flex items-center gap-2 text-orange-400"><CornerDownRight size={12}/> Fallback triggered</div>
-                  <div className="flex items-center gap-2 text-primary"><CornerDownRight size={12}/> {node} (Final)</div>
+                  <div className="flex items-center gap-2 text-orange-400"><CornerDownRight size={12}/> {routing.selected_node} (Failed)</div>
+                  <div className="flex items-center gap-2 text-orange-400"><CornerDownRight size={12}/> Fallback triggered: {routing.reason}</div>
+                  <div className="flex items-center gap-2 text-primary"><CornerDownRight size={12}/> {node}</div>
                 </>
               ) : (
                 <div className="flex items-center gap-2 text-primary"><CornerDownRight size={12}/> {node}</div>
@@ -72,7 +74,7 @@ export function ThinkingPanel({ result, ok }: ThinkingPanelProps) {
               
               {model && <div className="flex items-center gap-2 text-primary"><CornerDownRight size={12}/> {model}</div>}
               {isFailure ? (
-                <div className="flex items-center gap-2 text-red-400"><CornerDownRight size={12}/> Failed</div>
+                <div className="flex items-center gap-2 text-red-400"><CornerDownRight size={12}/> Failure: {failData.error_type}</div>
               ) : (
                 <div className="flex items-center gap-2 text-green-500"><CornerDownRight size={12}/> Response Delivered</div>
               )}
@@ -89,10 +91,10 @@ export function ThinkingPanel({ result, ok }: ThinkingPanelProps) {
                   <span className="font-medium text-foreground">{classification.task_type}</span>
                   <span className="opacity-70">Input Type</span>
                   <span className="font-medium text-foreground">{classification.input_type}</span>
-                  <span className="opacity-70">Difficulty</span>
-                  <span className="font-medium text-foreground">{classification.difficulty}</span>
-                  <span className="opacity-70">Confidence</span>
-                  <span className="font-medium text-foreground">{(classification.confidence * 100).toFixed(0)}%</span>
+                  <span className="opacity-70">Capability</span>
+                  <span className="font-medium text-foreground">{classification.required_capability}</span>
+                  <span className="opacity-70">Method</span>
+                  <span className="font-medium text-foreground">{classification.matched_rule || classification.classifier_method}</span>
                 </div>
               </div>
             )}
@@ -109,17 +111,28 @@ export function ThinkingPanel({ result, ok }: ThinkingPanelProps) {
                     <span className="font-mono text-foreground truncate">{model}</span>
                   </>
                 )}
-                <span className="opacity-70">Latency</span>
-                <span className="font-mono text-foreground flex items-center gap-1"><Zap size={10} />{latency.toFixed(0)} ms</span>
-                {!isFailure && routing && !routing.was_fallback && (
+                <span className="opacity-70">Routing Time</span>
+                <span className="font-mono text-foreground flex items-center gap-1"><Zap size={10} />{routing_ms.toFixed(0)} ms</span>
+                <span className="opacity-70">Inference Time</span>
+                <span className="font-mono text-foreground flex items-center gap-1"><Zap size={10} />{inference_ms.toFixed(0)} ms</span>
+                <span className="opacity-70">Total Time</span>
+                <span className="font-mono text-foreground flex items-center gap-1"><Zap size={10} />{total_ms.toFixed(0)} ms</span>
+                <span className="opacity-70">Status</span>
+                <span className="font-medium text-foreground">{isFailure ? "Failed" : "Completed"}</span>
                   <>
-                    <span className="opacity-70">Reason</span>
-                    <span className="text-foreground truncate" title={routing.reason}>{routing.reason}</span>
                   </>
-                )}
               </div>
             </div>
           </div>
+
+          {/* Raw Telemetry Debugging */}
+          <details className="text-[10px] text-muted-foreground border-t border-border/40 pt-2 mt-2">
+            <summary className="cursor-pointer hover:text-foreground">Developer Debug</summary>
+            <pre className="mt-2 p-2 bg-muted/30 rounded overflow-x-auto whitespace-pre-wrap">
+              {JSON.stringify(result, null, 2)}
+            </pre>
+          </details>
+
         </div>
       )}
     </div>

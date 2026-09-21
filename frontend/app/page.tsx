@@ -72,7 +72,7 @@ export default function DashboardPage() {
         timestamp: new Date().toISOString(),
         query: query,
         selected_node: qr.selected_node ?? fail.selected_node ?? "—",
-        latency_ms: qr.latency_ms ?? fail.latency_ms ?? 0,
+        total_ms: qr.total_ms ?? fail.total_ms ?? 0,
         status: (ok ? "success" : "error") as "success" | "error",
       }, ...prev].slice(0, 50));
 
