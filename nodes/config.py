@@ -91,7 +91,7 @@ def _make_node_configs(
             node_name="Text Generation Node",
             capability="text",
             node_type=NodeType.TEXT,
-            model_name="llama-3-8b-instruct",          # update to match your LM Studio model
+            model_name="",   # discovered live from GET /v1/models at health-probe time
             endpoint=text_url,
             supported_input_types=["text"],
             laptop_id=1,
@@ -103,7 +103,7 @@ def _make_node_configs(
             node_name="Vision Language Node",
             capability="vision",
             node_type=NodeType.VISION,
-            model_name="llava-1.5-7b",                  # update to match your LM Studio model
+            model_name="",   # discovered live from GET /v1/models at health-probe time
             endpoint=vision_url,
             supported_input_types=["image", "text_image"],
             laptop_id=2,
@@ -115,7 +115,7 @@ def _make_node_configs(
             node_name="Reasoning Node",
             capability="reasoning",
             node_type=NodeType.REASONING,
-            model_name="deepseek-r1-7b",                # update to match your LM Studio model
+            model_name="",   # discovered live from GET /v1/models at health-probe time
             endpoint=reasoning_url,
             supported_input_types=["text"],
             laptop_id=3,
@@ -127,7 +127,7 @@ def _make_node_configs(
             node_name="Code Generation Node",
             capability="coding",
             node_type=NodeType.CODE,
-            model_name="codellama-7b-instruct",         # update to match your LM Studio model
+            model_name="",   # discovered live from GET /v1/models at health-probe time
             endpoint=code_url,
             supported_input_types=["text", "code"],
             laptop_id=4,
@@ -139,7 +139,7 @@ def _make_node_configs(
             node_name="RAG / Embedding Node",
             capability="embedding/retrieval",
             node_type=NodeType.RAG,
-            model_name="nomic-embed-text",              # update to match your LM Studio model
+            model_name="",   # discovered live from GET /v1/models at health-probe time
             endpoint=rag_url,
             supported_input_types=["text"],
             laptop_id=5,

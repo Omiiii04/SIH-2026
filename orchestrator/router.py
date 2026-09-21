@@ -163,10 +163,13 @@ async def handle_query(
         )
 
         t_call_start = time.monotonic()
+        # node.model is populated by the health monitor from GET /v1/models.
+        # If it's still empty (node came online between probes), pass "" —
+        # LM Studio will use whichever model it currently has loaded.
         try:
             lm_resp: LMResponse = await call_node(
                 endpoint=node.endpoint,
-                model=node.model,
+                model=node.model,   # live model id, e.g. "gemma-4-e4b-it-qat"
                 query=request.query,
                 parameters=request.parameters,
                 timeout=timeout,

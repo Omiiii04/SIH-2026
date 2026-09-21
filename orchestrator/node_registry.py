@@ -51,7 +51,7 @@ def _build_registry() -> Dict[str, NodeRegistryEntry]:
             node_name="Text Generation Node",
             capability="text",
             node_type=NodeType.TEXT,
-            model="google/gemma-4-e4b",
+            model="",          # populated dynamically from /v1/models on first health probe
             endpoint=cfg.node_text_url,
             status=_initial_status(cfg.node_text_url),
             supported_input_types=[InputType.TEXT.value],
@@ -62,7 +62,7 @@ def _build_registry() -> Dict[str, NodeRegistryEntry]:
             node_name="Vision Language Node",
             capability="vision",
             node_type=NodeType.VISION,
-            model="llava-1.5-7b",
+            model="",          # populated dynamically from /v1/models on first health probe
             endpoint=cfg.node_vision_url,
             status=_initial_status(cfg.node_vision_url),
             supported_input_types=[InputType.IMAGE.value, InputType.TEXT.value],
@@ -73,7 +73,7 @@ def _build_registry() -> Dict[str, NodeRegistryEntry]:
             node_name="Reasoning Node",
             capability="reasoning",
             node_type=NodeType.REASONING,
-            model="deepseek-r1-7b",
+            model="",          # populated dynamically from /v1/models on first health probe
             endpoint=cfg.node_reasoning_url,
             status=_initial_status(cfg.node_reasoning_url),
             supported_input_types=[InputType.TEXT.value, InputType.REASONING.value],
@@ -84,7 +84,7 @@ def _build_registry() -> Dict[str, NodeRegistryEntry]:
             node_name="Code Generation Node",
             capability="coding",
             node_type=NodeType.CODE,
-            model="codellama-7b-instruct",
+            model="",          # populated dynamically from /v1/models on first health probe
             endpoint=cfg.node_code_url,
             status=_initial_status(cfg.node_code_url),
             supported_input_types=[InputType.TEXT.value, InputType.CODE.value],
@@ -95,7 +95,7 @@ def _build_registry() -> Dict[str, NodeRegistryEntry]:
             node_name="RAG / Embedding Node",
             capability="embedding/retrieval",
             node_type=NodeType.RAG,
-            model="nomic-embed-text",
+            model="",          # populated dynamically from /v1/models on first health probe
             endpoint=cfg.node_rag_url,
             status=_initial_status(cfg.node_rag_url),
             supported_input_types=[InputType.TEXT.value, InputType.RETRIEVAL.value],
@@ -193,6 +193,33 @@ def set_node_status(node_id: str, status: str) -> bool:
     # NodeRegistryEntry is a Pydantic model; update via model_copy
     _REGISTRY[node_id] = node.model_copy(update={"status": status})
     logger.info("Node status updated: %s → %s", node_id, status)
+    return True
+
+
+def set_node_model(node_id: str, model: str) -> bool:
+    """
+    Update the active model name for a node (discovered live from /v1/models).
+
+    Called by the health monitor after each successful probe so that the
+    router always sends the exact model ID that LM Studio reports, regardless
+    of what is hardcoded in config.
+
+    Parameters
+    ----------
+    node_id: Registry key e.g. "NODE-TEXT"
+    model:   The model identifier returned by GET /v1/models → data[0].id
+
+    Returns True if the node was found and updated.
+    """
+    if not model:
+        return False
+    node = _REGISTRY.get(node_id)
+    if node is None:
+        logger.warning("set_node_model: unknown node_id=%s", node_id)
+        return False
+    if node.model != model:
+        _REGISTRY[node_id] = node.model_copy(update={"model": model})
+        logger.info("Node model updated: %s → %s", node_id, model)
     return True
 
 

@@ -11,7 +11,7 @@ from typing import Deque, Dict, Optional
 import httpx
 
 from orchestrator.config import get_settings
-from orchestrator.node_registry import get_registry, set_node_status
+from orchestrator.node_registry import get_registry, set_node_model, set_node_status
 from orchestrator.schemas import NodeStatus, NodeStatusEntry
 
 logger = logging.getLogger(__name__)
@@ -74,6 +74,10 @@ async def _probe(client: httpx.AsyncClient, node_id: str, base_url: str) -> None
             status = NodeStatus.DEGRADED if latency_ms > DEGRADED_THRESHOLD_MS else NodeStatus.ONLINE
             registry_status = "online"
             last_success = now
+            # Sync the live model name into the registry so the router always
+            # uses the exact model ID that LM Studio reports.
+            if model_loaded:
+                set_node_model(node_id, model_loaded)
         else:
             status = NodeStatus.OFFLINE
             registry_status = "offline"

@@ -6,11 +6,11 @@ import { Cpu, Zap, Clock, Wifi, WifiOff, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 const NODE_META: Record<string, { icon: string; color: string; capability: string; model: string }> = {
-  "NODE-TEXT":      { icon: "T",  color: "oklch(0.65 0.22 265)",  capability: "text",               model: "google/gemma-4-e4b" },
-  "NODE-VISION":    { icon: "V",  color: "oklch(0.65 0.22 320)",  capability: "vision",             model: "llava-1.5-7b" },
-  "NODE-REASONING": { icon: "R",  color: "oklch(0.65 0.22 165)",  capability: "reasoning",          model: "deepseek-r1-7b" },
-  "NODE-CODE":      { icon: "C",  color: "oklch(0.78 0.18 65)",   capability: "coding",             model: "codellama-7b-instruct" },
-  "NODE-RAG":       { icon: "E",  color: "oklch(0.65 0.22 200)",  capability: "embedding/retrieval",model: "nomic-embed-text" },
+  "NODE-TEXT":      { icon: "T",  color: "oklch(0.65 0.22 265)",  capability: "text",               model: "Unknown" },
+  "NODE-VISION":    { icon: "V",  color: "oklch(0.65 0.22 320)",  capability: "vision",             model: "Unknown" },
+  "NODE-REASONING": { icon: "R",  color: "oklch(0.65 0.22 165)",  capability: "reasoning",          model: "Unknown" },
+  "NODE-CODE":      { icon: "C",  color: "oklch(0.78 0.18 65)",   capability: "coding",             model: "Unknown" },
+  "NODE-RAG":       { icon: "E",  color: "oklch(0.65 0.22 200)",  capability: "embedding/retrieval",model: "Unknown" },
 };
 
 function StatusIcon({ status }: { status: string }) {
