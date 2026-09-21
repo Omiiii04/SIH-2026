@@ -26,11 +26,11 @@ logger = logging.getLogger(__name__)
 def _node_url_map() -> dict[NodeType, str]:
     cfg = get_settings()
     return {
-        NodeType.TEXT: cfg.node_text_url,
-        NodeType.VISION: cfg.node_vision_url,
-        NodeType.REASONING: cfg.node_reasoning_url,
-        NodeType.CODE: cfg.node_code_url,
-        NodeType.RAG: cfg.node_rag_url,
+        NodeType.TEXT: cfg.node_1_url,
+        NodeType.VISION: cfg.node_2_url,
+        NodeType.REASONING: cfg.node_3_url,
+        NodeType.CODE: cfg.node_4_url,
+        NodeType.RAG: cfg.node_5_url,
     }
 
 

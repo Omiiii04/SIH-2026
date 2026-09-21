@@ -52,13 +52,13 @@ class Settings(BaseSettings):
     chroma_collection: str = "conversation_memory"
 
     # ── Worker Nodes (LM Studio endpoints) ───────────────────────────────────
-    # Leave empty ("") for laptops not yet provisioned — they will be treated
-    # as OFFLINE by the health checker and node tester.
-    node_text_url: str = ""
-    node_vision_url: str = ""
-    node_reasoning_url: str = ""
-    node_code_url: str = ""
-    node_rag_url: str = ""
+    # ── Node Endpoints ────────────────────────────────────────────────────────
+    # Pulled from .env (NODE_1_URL, NODE_2_URL, etc.)
+    node_1_url: str = ""
+    node_2_url: str = ""
+    node_3_url: str = ""
+    node_4_url: str = ""
+    node_5_url: str = ""
 
     # ── HTTP Client ───────────────────────────────────────────────────────────
     http_timeout: float = 30.0        # seconds

@@ -5,7 +5,7 @@ Phase 5 - Failover and fault tolerance test.
 
 Tests:
   TEST 1: All nodes online - requests route to primary.
-  TEST 2: Knock NODE-TEXT offline - text query falls back to NODE-REASONING.
+  TEST 2: Knock NODE-1 offline - text query falls back to NODE-3.
   TEST 3: Knock two nodes offline - remaining nodes continue serving.
   TEST 4: Artificial latency detection (inject via PATCH + observe).
   TEST 7: Bring failed nodes back - monitor detects and restores.
@@ -69,10 +69,10 @@ def run(base: str) -> int:
         )
         failures += 0 if ok else 1
 
-    # ── TEST 2: NODE-TEXT offline -> fallback ──────────────────────────────────
-    print("\n=== TEST 2: NODE-TEXT offline - expect fallback ===")
+    # ── TEST 2: NODE-1 offline -> fallback ──────────────────────────────────
+    print("\n=== TEST 2: NODE-1 offline - expect fallback ===")
     # Knock it offline
-    client.patch("/api/v1/nodes/NODE-TEXT/status", params={"status": "offline"})
+    client.patch("/api/v1/nodes/NODE-1/status", params={"status": "offline"})
     time.sleep(0.2)
 
     resp = post_query(client, "What is machine learning?")
@@ -81,8 +81,8 @@ def run(base: str) -> int:
     routing = body.get("routing", {})
     was_fallback = routing.get("was_fallback", False)
 
-    ok = check("NODE-TEXT offline -> different node or fallback used",
-               node != "NODE-TEXT" or was_fallback,
+    ok = check("NODE-1 offline -> different node or fallback used",
+               node != "NODE-1" or was_fallback,
                f"node={node} was_fallback={was_fallback}")
     failures += 0 if ok else 1
 
@@ -91,24 +91,24 @@ def run(base: str) -> int:
 
     print(f"  Routing reason: {routing.get('reason','')[:100]}")
 
-    # Restore NODE-TEXT
-    client.patch("/api/v1/nodes/NODE-TEXT/status", params={"status": "online"})
+    # Restore NODE-1
+    client.patch("/api/v1/nodes/NODE-1/status", params={"status": "online"})
 
     # ── TEST 3: Two nodes offline ──────────────────────────────────────────────
-    print("\n=== TEST 3: Two nodes offline (NODE-CODE, NODE-VISION) ===")
-    client.patch("/api/v1/nodes/NODE-CODE/status",   params={"status": "offline"})
-    client.patch("/api/v1/nodes/NODE-VISION/status", params={"status": "offline"})
+    print("\n=== TEST 3: Two nodes offline (NODE-4, NODE-2) ===")
+    client.patch("/api/v1/nodes/NODE-4/status",   params={"status": "offline"})
+    client.patch("/api/v1/nodes/NODE-2/status", params={"status": "offline"})
     time.sleep(0.2)
 
-    # Text query should still work (NODE-TEXT, NODE-REASONING remain)
+    # Text query should still work (NODE-1, NODE-3 remain)
     resp = post_query(client, "Summarize the French Revolution")
     ok = check("Text query succeeds with 2 nodes offline", resp["status_code"] in (200, 503))
     failures += 0 if ok else 1
     print(f"  Status: {resp['status_code']}  node: {resp['body'].get('selected_node','?')}")
 
     # Restore
-    client.patch("/api/v1/nodes/NODE-CODE/status",   params={"status": "online"})
-    client.patch("/api/v1/nodes/NODE-VISION/status", params={"status": "online"})
+    client.patch("/api/v1/nodes/NODE-4/status",   params={"status": "online"})
+    client.patch("/api/v1/nodes/NODE-2/status", params={"status": "online"})
 
     # ── TEST 4: Metrics show latency ───────────────────────────────────────────
     print("\n=== TEST 4: Latency is recorded in /api/v1/metrics ===")
@@ -130,8 +130,8 @@ def run(base: str) -> int:
     if r.status_code == 200:
         nodes = {n["node_id"]: n["status"] for n in r.json().get("nodes", [])}
         print(f"  Node statuses: {nodes}")
-        ok = check("Registry has NODE-CODE and NODE-TEXT entries",
-                   "NODE-CODE" in nodes and "NODE-TEXT" in nodes)
+        ok = check("Registry has NODE-4 and NODE-1 entries",
+                   "NODE-4" in nodes and "NODE-1" in nodes)
         failures += 0 if ok else 1
     else:
         failures += 1

@@ -18,7 +18,7 @@ Usage
     python scripts/test_nodes.py --no-inference
 
     # Test a single node:
-    python scripts/test_nodes.py --node NODE-TEXT
+    python scripts/test_nodes.py --node NODE-1
 
     # Set custom timeout (seconds):
     python scripts/test_nodes.py --timeout 5
@@ -28,11 +28,11 @@ Output example
     ╔══════════════════════════════════════════════════════════════════╗
     ║          SIH-2026  Node Connectivity Report                      ║
     ╚══════════════════════════════════════════════════════════════════╝
-    NODE-TEXT        ONLINE    320 ms   llama-3-8b-instruct
-    NODE-VISION      OFFLINE   —        (not configured)
-    NODE-REASONING   OFFLINE   —        (not configured)
-    NODE-CODE        OFFLINE   —        (not configured)
-    NODE-RAG         OFFLINE   —        (not configured)
+    NODE-1        ONLINE    320 ms   llama-3-8b-instruct
+    NODE-2      OFFLINE   —        (not configured)
+    NODE-3   OFFLINE   —        (not configured)
+    NODE-4        OFFLINE   —        (not configured)
+    NODE-5         OFFLINE   —        (not configured)
     ──────────────────────────────────────────────────────────────────
     Reachable: 1 / 5   |   Offline: 4 / 5
 """
@@ -359,7 +359,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--node", type=str, default=None,
         metavar="NODE_ID",
-        help="Test a single node by ID, e.g. --node NODE-TEXT",
+        help="Test a single node by ID, e.g. --node NODE-1",
     )
     parser.add_argument(
         "--json", action="store_true",

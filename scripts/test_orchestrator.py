@@ -12,8 +12,8 @@ Output format (per request):
   ─────────────────────────────────────────────────────────────
   INPUT        What is a transformer in deep learning?
   TYPE         text
-  CLASSIFICATION  NODE-TEXT  (rule: default_fallback)
-  SELECTED NODE   NODE-TEXT
+  CLASSIFICATION  NODE-1  (rule: default_fallback)
+  SELECTED NODE   NODE-1
   MODEL           google/gemma-4-e4b
   LATENCY         342 ms
   RESPONSE        Transformers are…
@@ -83,7 +83,7 @@ TEST_CASES: List[TestCase] = [
             "query": "What is a transformer model in deep learning? Explain briefly.",
             "input_type": "text",
         },
-        expect_node="NODE-TEXT",
+        expect_node="NODE-1",
     ),
     TestCase(
         name="Code Generation",
@@ -92,7 +92,7 @@ TEST_CASES: List[TestCase] = [
             "query": "Write a Python function that checks if a string is a palindrome.",
             "input_type": "text",
         },
-        expect_node="NODE-CODE",
+        expect_node="NODE-4",
     ),
     TestCase(
         name="Reasoning / Analysis",
@@ -101,7 +101,7 @@ TEST_CASES: List[TestCase] = [
             "query": "Analyse step by step why the transformer architecture outperforms RNNs for NLP.",
             "input_type": "text",
         },
-        expect_node="NODE-REASONING",
+        expect_node="NODE-3",
     ),
     TestCase(
         name="Document Retrieval",
@@ -110,7 +110,7 @@ TEST_CASES: List[TestCase] = [
             "query": "Search the document and retrieve the key findings from the introduction section.",
             "input_type": "retrieval",
         },
-        expect_node="NODE-RAG",
+        expect_node="NODE-5",
     ),
     TestCase(
         name="Code Debug",
@@ -119,7 +119,7 @@ TEST_CASES: List[TestCase] = [
             "query": "Debug this Python code: for i in range(10) print(i)",
             "input_type": "code",
         },
-        expect_node="NODE-CODE",
+        expect_node="NODE-4",
     ),
     TestCase(
         name="General Knowledge",
@@ -128,7 +128,7 @@ TEST_CASES: List[TestCase] = [
             "query": "Tell me about the history of artificial intelligence.",
             "input_type": "text",
         },
-        expect_node="NODE-TEXT",
+        expect_node="NODE-1",
     ),
     TestCase(
         name="Logical Reasoning",
@@ -137,7 +137,7 @@ TEST_CASES: List[TestCase] = [
             "query": "If all mammals are warm-blooded and whales are mammals, infer what follows.",
             "input_type": "reasoning",
         },
-        expect_node="NODE-REASONING",
+        expect_node="NODE-3",
     ),
 ]
 

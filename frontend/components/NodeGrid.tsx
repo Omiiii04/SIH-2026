@@ -5,7 +5,7 @@ import { fetchNodes } from "@/lib/api";
 import { NodeCard } from "./NodeCard";
 import { RefreshCw } from "lucide-react";
 
-const NODE_ORDER = ["NODE-TEXT", "NODE-VISION", "NODE-REASONING", "NODE-CODE", "NODE-RAG"];
+const NODE_ORDER = ["NODE-1", "NODE-2", "NODE-3", "NODE-4", "NODE-5"];
 
 export function NodeGrid({ activeNode }: { activeNode?: string }) {
   const { data, error, isLoading } = useSWR("/api/v1/nodes", fetchNodes, {

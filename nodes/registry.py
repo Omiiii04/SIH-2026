@@ -44,31 +44,31 @@ def build_registry() -> Dict[NodeType, NodeDescriptor]:
     return {
         NodeType.TEXT: NodeDescriptor(
             node_type=NodeType.TEXT,
-            base_url=cfg.node_text_url,
+            base_url=cfg.node_1_url,
             description="General-purpose text generation and conversation.",
             capabilities=["chat", "summarisation", "translation", "Q&A"],
         ),
         NodeType.VISION: NodeDescriptor(
             node_type=NodeType.VISION,
-            base_url=cfg.node_vision_url,
+            base_url=cfg.node_2_url,
             description="Multimodal vision-language model for image understanding.",
             capabilities=["image captioning", "visual Q&A", "OCR"],
         ),
         NodeType.REASONING: NodeDescriptor(
             node_type=NodeType.REASONING,
-            base_url=cfg.node_reasoning_url,
+            base_url=cfg.node_3_url,
             description="Advanced reasoning and chain-of-thought model.",
             capabilities=["multi-step reasoning", "analysis", "logical inference"],
         ),
         NodeType.CODE: NodeDescriptor(
             node_type=NodeType.CODE,
-            base_url=cfg.node_code_url,
+            base_url=cfg.node_4_url,
             description="Code generation, debugging, and explanation.",
             capabilities=["code generation", "debugging", "code review", "documentation"],
         ),
         NodeType.RAG: NodeDescriptor(
             node_type=NodeType.RAG,
-            base_url=cfg.node_rag_url,
+            base_url=cfg.node_5_url,
             description="Retrieval-augmented generation over uploaded documents.",
             capabilities=["document Q&A", "semantic search", "knowledge retrieval"],
         ),

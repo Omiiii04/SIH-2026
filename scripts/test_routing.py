@@ -16,7 +16,7 @@ Output per request:
   DIFFICULTY     medium
   CAPABILITY     coding
   CONFIDENCE     97%  (rule:debug_keywords:find the bug)
-  SELECTED NODE  NODE-CODE
+  SELECTED NODE  NODE-4
   REASON         The request requires debugging and fixing code…
   WAS FALLBACK   No
   MODEL          codellama-7b-instruct
@@ -33,7 +33,7 @@ Usage
   python scripts/test_routing.py --url http://localhost:8000
   python scripts/test_routing.py --timeout 60
   python scripts/test_routing.py --json
-  python scripts/test_routing.py --offline NODE-CODE   # simulate node offline first
+  python scripts/test_routing.py --offline NODE-4   # simulate node offline first
 """
 
 from __future__ import annotations
@@ -80,20 +80,20 @@ ROUTING_CASES: List[RoutingCase] = [
     RoutingCase(
         name="Case 1 — General Text",
         payload={"user_id": "tester", "query": "What is Python?", "input_type": "text"},
-        expected_node="NODE-TEXT",
-        description="General knowledge query — should route to NODE-TEXT",
+        expected_node="NODE-1",
+        description="General knowledge query — should route to NODE-1",
     ),
     RoutingCase(
         name="Case 2 — Code Generation",
         payload={"user_id": "tester", "query": "Write a FastAPI endpoint that returns a JSON response.", "input_type": "text"},
-        expected_node="NODE-CODE",
-        description="Code generation — should route to NODE-CODE",
+        expected_node="NODE-4",
+        description="Code generation — should route to NODE-4",
     ),
     RoutingCase(
         name="Case 3 — Visual QA",
         payload={"user_id": "tester", "query": "Explain what is shown in this image.", "input_type": "image"},
-        expected_node="NODE-VISION",
-        description="Image input — should route to NODE-VISION",
+        expected_node="NODE-2",
+        description="Image input — should route to NODE-2",
     ),
     RoutingCase(
         name="Case 4 — Hard Reasoning",
@@ -101,40 +101,40 @@ ROUTING_CASES: List[RoutingCase] = [
                  "query": "Prove step by step using formal logic that if all humans are mortal "
                           "and Socrates is human, then Socrates is mortal.",
                  "input_type": "text"},
-        expected_node="NODE-REASONING",
-        description="Complex multi-step reasoning — should route to NODE-REASONING",
+        expected_node="NODE-3",
+        description="Complex multi-step reasoning — should route to NODE-3",
     ),
     RoutingCase(
         name="Case 5 — Embedding / Search",
         payload={"user_id": "tester",
                  "query": "Search the knowledge base and retrieve documents about transformer architecture.",
                  "input_type": "retrieval"},
-        expected_node="NODE-RAG",
-        description="Retrieval / embedding — should route to NODE-RAG",
+        expected_node="NODE-5",
+        description="Retrieval / embedding — should route to NODE-5",
     ),
     RoutingCase(
         name="Case 6 — Code Debug",
         payload={"user_id": "tester",
                  "query": "Find the bug in this Python code: def add(a, b) return a + b",
                  "input_type": "text"},
-        expected_node="NODE-CODE",
-        description="Code debug — should route to NODE-CODE",
+        expected_node="NODE-4",
+        description="Code debug — should route to NODE-4",
     ),
     RoutingCase(
         name="Case 7 — Summarisation",
         payload={"user_id": "tester",
                  "query": "Summarise the key points of the transformer paper in 3 sentences.",
                  "input_type": "text"},
-        expected_node="NODE-TEXT",
-        description="Summarisation — should route to NODE-TEXT",
+        expected_node="NODE-1",
+        description="Summarisation — should route to NODE-1",
     ),
     RoutingCase(
         name="Case 8 — Math / Proof",
         payload={"user_id": "tester",
                  "query": "Calculate the derivative of f(x) = x³ + 2x² - 5x + 7",
                  "input_type": "text"},
-        expected_node="NODE-REASONING",
-        description="Mathematics / calculus — should route to NODE-REASONING",
+        expected_node="NODE-3",
+        description="Mathematics / calculus — should route to NODE-3",
     ),
 ]
 
@@ -303,7 +303,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--timeout", type=float, default=60.0,
                    help="Per-request timeout in seconds (default: 60)")
     p.add_argument("--offline", metavar="NODE_ID",
-                   help="Mark a node offline before running (e.g. --offline NODE-CODE)")
+                   help="Mark a node offline before running (e.g. --offline NODE-4)")
     p.add_argument("--json", action="store_true",
                    help="Output raw JSON instead of human-readable report")
     return p.parse_args()

@@ -75,7 +75,7 @@ def _fake_lm_response(content: str = "Test model response.") -> LMResponse:
 def _fake_query_response(
     request_id: str | None = None,
     query: str = "Explain transformers",
-    node: str = "NODE-TEXT",
+    node: str = "NODE-1",
 ) -> QueryResponse:
     rid = request_id or str(uuid.uuid4())
     cls = ClassificationResult(
@@ -152,7 +152,7 @@ class TestPersistSuccess:
         failure = NodeFailureResponse(
             request_id=str(uuid.uuid4()),
             user_id="test_user_001",
-            selected_node="NODE-TEXT",
+            selected_node="NODE-1",
             error_type="connection_error",
             detail="refused",
             latency_ms=5.0,
@@ -194,7 +194,7 @@ class TestPersistSuccess:
     @pytest.mark.asyncio
     async def test_query_endpoint_schedules_persist_task(self):
         """POST /api/v1/query must schedule a persist_success task (fire-and-forget)."""
-        set_node_status("NODE-TEXT", "online")
+        set_node_status("NODE-1", "online")
 
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call, \
              patch("orchestrator.persistence.persist_success", new_callable=AsyncMock) as mock_persist, \
@@ -233,8 +233,8 @@ class TestMemorySearch:
             "ids":       [["req-001", "req-002"]],
             "documents": [["What is AI?\n\nAI is artificial intelligence.", "Explain ML\n\nML is machine learning."]],
             "metadatas": [[
-                {"user_id": "u1", "query_preview": "What is AI?",  "node_id": "NODE-TEXT", "model": "m1", "timestamp": "2026-01-01T00:00:00Z", "session_id": ""},
-                {"user_id": "u1", "query_preview": "Explain ML",   "node_id": "NODE-TEXT", "model": "m1", "timestamp": "2026-01-01T00:01:00Z", "session_id": ""},
+                {"user_id": "u1", "query_preview": "What is AI?",  "node_id": "NODE-1", "model": "m1", "timestamp": "2026-01-01T00:00:00Z", "session_id": ""},
+                {"user_id": "u1", "query_preview": "Explain ML",   "node_id": "NODE-1", "model": "m1", "timestamp": "2026-01-01T00:01:00Z", "session_id": ""},
             ]],
             "distances":  [[0.1, 0.2]],
         }
@@ -290,7 +290,7 @@ class TestMemorySearch:
                 "request_id": "rid-001",
                 "query":      "What is AI?",
                 "response":   "AI is ...",
-                "node_id":    "NODE-TEXT",
+                "node_id":    "NODE-1",
                 "model":      "test-model",
                 "timestamp":  "2026-01-01T00:00:00Z",
                 "session_id": "",
@@ -338,7 +338,7 @@ class TestMemorySearch:
             "request_id": "rid-002",
             "query":      "Explain BERT",
             "response":   "BERT is a transformer-based model.",
-            "node_id":    "NODE-TEXT",
+            "node_id":    "NODE-1",
             "model":      "bert-base",
             "timestamp":  "2026-01-02T10:00:00Z",
             "session_id": "session_x",
@@ -379,7 +379,7 @@ class TestDataSurvivesRestart:
                 "request_id": "pre-seeded-001",
                 "query":      "What is distributed AI?",
                 "response":   "Distributed AI splits work across nodes.",
-                "node_id":    "NODE-TEXT",
+                "node_id":    "NODE-1",
                 "model":      "llm-7b",
                 "timestamp":  "2026-01-01T08:00:00Z",
                 "session_id": "",
@@ -442,7 +442,7 @@ class TestDatabaseDown:
         When PostgreSQL is down, POST /api/v1/query must still return 200
         with a valid response — persistence errors are logged but not propagated.
         """
-        set_node_status("NODE-TEXT", "online")
+        set_node_status("NODE-1", "online")
 
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call, \
              patch("orchestrator.persistence.persist_success",
@@ -469,7 +469,7 @@ class TestDatabaseDown:
     @pytest.mark.asyncio
     async def test_chroma_down_does_not_affect_query_response(self):
         """ChromaDB failure must not break the inference response."""
-        set_node_status("NODE-TEXT", "online")
+        set_node_status("NODE-1", "online")
 
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call, \
              patch("orchestrator.persistence._write_postgres_success", new_callable=AsyncMock), \
@@ -558,7 +558,7 @@ class TestChromaStorage:
                 session_id="sess-1",
                 query="What is AI?",
                 response="AI is the simulation of human intelligence.",
-                node_id="NODE-TEXT",
+                node_id="NODE-1",
                 model="test-model",
                 timestamp="2026-01-01T00:00:00Z",
             )
@@ -570,7 +570,7 @@ class TestChromaStorage:
         assert "req-123" in call_kwargs.kwargs["ids"]
         assert "What is AI?" in call_kwargs.kwargs["documents"][0]
         assert call_kwargs.kwargs["metadatas"][0]["user_id"] == "u1"
-        assert call_kwargs.kwargs["metadatas"][0]["node_id"] == "NODE-TEXT"
+        assert call_kwargs.kwargs["metadatas"][0]["node_id"] == "NODE-1"
 
     @pytest.mark.asyncio
     async def test_add_interaction_noop_when_collection_none(self):

@@ -60,8 +60,8 @@ def run(base: str) -> int:
             failures += 0 if ok else 1
         print("  Metrics:", json.dumps(body, indent=2))
 
-    print("\n=== TEST 3: PATCH /api/v1/nodes/NODE-TEXT/status?status=offline ===")
-    r = client.patch("/api/v1/nodes/NODE-TEXT/status", params={"status": "offline"})
+    print("\n=== TEST 3: PATCH /api/v1/nodes/NODE-1/status?status=offline ===")
+    r = client.patch("/api/v1/nodes/NODE-1/status", params={"status": "offline"})
     ok = check("HTTP 200", r.status_code == 200, str(r.status_code))
     failures += 0 if ok else 1
     if ok:
@@ -69,17 +69,17 @@ def run(base: str) -> int:
         ok = check("Status is offline in response", body.get("status") == "offline")
         failures += 0 if ok else 1
 
-    print("\n=== TEST 4: Verify NODE-TEXT shows OFFLINE in /api/v1/nodes ===")
+    print("\n=== TEST 4: Verify NODE-1 shows OFFLINE in /api/v1/nodes ===")
     # Give monitor a moment (it may override our PATCH, so we just check the PATCH was accepted)
     r = client.get("/api/v1/nodes")
     if r.status_code == 200:
         nodes = {n["node_id"]: n for n in r.json().get("nodes", [])}
         # Note: monitor may have already run and changed it; we just log
-        nt = nodes.get("NODE-TEXT", {})
-        print(f"  NODE-TEXT current status: {nt.get('status')} (monitor may have updated)")
+        nt = nodes.get("NODE-1", {})
+        print(f"  NODE-1 current status: {nt.get('status')} (monitor may have updated)")
 
-    print("\n=== TEST 5: Restore NODE-TEXT to online ===")
-    r = client.patch("/api/v1/nodes/NODE-TEXT/status", params={"status": "online"})
+    print("\n=== TEST 5: Restore NODE-1 to online ===")
+    r = client.patch("/api/v1/nodes/NODE-1/status", params={"status": "online"})
     ok = check("HTTP 200", r.status_code == 200, str(r.status_code))
     failures += 0 if ok else 1
 

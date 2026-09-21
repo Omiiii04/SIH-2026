@@ -6,11 +6,11 @@ import { Cpu, Zap, Clock, Wifi, WifiOff, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 const NODE_META: Record<string, { icon: string; color: string; capability: string; model: string }> = {
-  "NODE-TEXT":      { icon: "T",  color: "oklch(0.65 0.22 265)",  capability: "text",               model: "Unknown" },
-  "NODE-VISION":    { icon: "V",  color: "oklch(0.65 0.22 320)",  capability: "vision",             model: "Unknown" },
-  "NODE-REASONING": { icon: "R",  color: "oklch(0.65 0.22 165)",  capability: "reasoning",          model: "Unknown" },
-  "NODE-CODE":      { icon: "C",  color: "oklch(0.78 0.18 65)",   capability: "coding",             model: "Unknown" },
-  "NODE-RAG":       { icon: "E",  color: "oklch(0.65 0.22 200)",  capability: "embedding/retrieval",model: "Unknown" },
+  "NODE-1": { icon: "1",  color: "oklch(0.65 0.22 265)",  capability: "text",               model: "Unknown" },
+  "NODE-2": { icon: "2",  color: "oklch(0.65 0.22 320)",  capability: "vision",             model: "Unknown" },
+  "NODE-3": { icon: "3",  color: "oklch(0.65 0.22 165)",  capability: "reasoning",          model: "Unknown" },
+  "NODE-4": { icon: "4",  color: "oklch(0.78 0.18 65)",   capability: "coding",             model: "Unknown" },
+  "NODE-5": { icon: "5",  color: "oklch(0.65 0.22 200)",  capability: "embedding/retrieval",model: "Unknown" },
 };
 
 function StatusIcon({ status }: { status: string }) {
@@ -51,16 +51,32 @@ export function NodeCard({ node, active }: { node: NodeStatusEntry; active?: boo
           {meta.icon}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-mono text-sm font-semibold truncate">{node.node_id}</p>
+          <p className="font-mono text-sm font-semibold truncate">
+            {node.node_id === "NODE-1" ? "Node 1 (Orchestrator)" : `Node ${node.node_id.split("-")[1]}`}
+          </p>
           <p className="text-xs text-muted-foreground capitalize">{meta.capability}</p>
         </div>
         <StatusIcon status={node.status} />
       </div>
 
-      {/* Status badge */}
-      <Badge variant="outline" className={cn("w-fit text-xs", statusBadge(node.status))}>
-        {node.status}
-      </Badge>
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Status badge */}
+        <Badge variant="outline" className={cn("w-fit text-xs", statusBadge(node.status))}>
+          {node.status}
+        </Badge>
+        {/* Orchestrator Badge */}
+        {node.node_id === "NODE-1" && (
+          <Badge variant="outline" className="w-fit text-xs bg-purple-500/20 text-purple-300 border-purple-500/30">
+            ORCHESTRATOR
+          </Badge>
+        )}
+        {/* Capacity badge */}
+        {node.capacity && (
+          <Badge variant="outline" className="w-fit text-xs bg-blue-500/20 text-blue-300 border-blue-500/30 font-mono">
+            {node.capacity}
+          </Badge>
+        )}
+      </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-2 text-xs">

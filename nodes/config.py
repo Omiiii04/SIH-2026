@@ -76,71 +76,71 @@ class NodeConfig:
 # This function is called by build_node_configs() below.
 
 def _make_node_configs(
-    text_url: str,
-    vision_url: str,
-    reasoning_url: str,
-    code_url: str,
-    rag_url: str,
+    node_1_url: str,
+    node_2_url: str,
+    node_3_url: str,
+    node_4_url: str,
+    node_5_url: str,
 ) -> Dict[str, NodeConfig]:
     """
     Build the ordered dict of all five node configs given their base URLs.
     """
     return {
-        "NODE-TEXT": NodeConfig(
-            node_id="NODE-TEXT",
-            node_name="Text Generation Node",
+        "NODE-1": NodeConfig(
+            node_id="NODE-1",
+            node_name="Node 1 (Orchestrator)",
             capability="text",
             node_type=NodeType.TEXT,
             model_name="",   # discovered live from GET /v1/models at health-probe time
-            endpoint=text_url,
+            endpoint=node_1_url,
             supported_input_types=["text"],
             laptop_id=1,
             description="General-purpose chat, summarisation, Q&A, and translation.",
             test_prompt="In exactly 5 words, what is your purpose?",
         ),
-        "NODE-VISION": NodeConfig(
-            node_id="NODE-VISION",
-            node_name="Vision Language Node",
+        "NODE-2": NodeConfig(
+            node_id="NODE-2",
+            node_name="Node 2",
             capability="vision",
             node_type=NodeType.VISION,
             model_name="",   # discovered live from GET /v1/models at health-probe time
-            endpoint=vision_url,
+            endpoint=node_2_url,
             supported_input_types=["image", "text_image"],
             laptop_id=2,
             description="Multimodal image understanding, OCR, and visual Q&A.",
             test_prompt="Describe what you can do in one sentence.",
         ),
-        "NODE-REASONING": NodeConfig(
-            node_id="NODE-REASONING",
-            node_name="Reasoning Node",
+        "NODE-3": NodeConfig(
+            node_id="NODE-3",
+            node_name="Node 3",
             capability="reasoning",
             node_type=NodeType.REASONING,
             model_name="",   # discovered live from GET /v1/models at health-probe time
-            endpoint=reasoning_url,
+            endpoint=node_3_url,
             supported_input_types=["text"],
             laptop_id=3,
             description="Step-by-step chain-of-thought reasoning and logical inference.",
             test_prompt="What is 2 + 2? Think step by step.",
         ),
-        "NODE-CODE": NodeConfig(
-            node_id="NODE-CODE",
-            node_name="Code Generation Node",
+        "NODE-4": NodeConfig(
+            node_id="NODE-4",
+            node_name="Node 4",
             capability="coding",
             node_type=NodeType.CODE,
             model_name="",   # discovered live from GET /v1/models at health-probe time
-            endpoint=code_url,
+            endpoint=node_4_url,
             supported_input_types=["text", "code"],
             laptop_id=4,
             description="Code generation, debugging, review, and documentation.",
             test_prompt="Write a Python one-liner to reverse a string.",
         ),
-        "NODE-RAG": NodeConfig(
-            node_id="NODE-RAG",
-            node_name="RAG / Embedding Node",
+        "NODE-5": NodeConfig(
+            node_id="NODE-5",
+            node_name="Node 5",
             capability="embedding/retrieval",
             node_type=NodeType.RAG,
             model_name="",   # discovered live from GET /v1/models at health-probe time
-            endpoint=rag_url,
+            endpoint=node_5_url,
             supported_input_types=["text"],
             laptop_id=5,
             description="Retrieval-augmented generation over uploaded documents.",
@@ -157,11 +157,11 @@ def build_node_configs() -> Dict[str, NodeConfig]:
     from orchestrator.config import get_settings  # local import to avoid circular deps
     cfg = get_settings()
     return _make_node_configs(
-        text_url=cfg.node_text_url,
-        vision_url=cfg.node_vision_url,
-        reasoning_url=cfg.node_reasoning_url,
-        code_url=cfg.node_code_url,
-        rag_url=cfg.node_rag_url,
+        node_1_url=cfg.node_1_url,
+        node_2_url=cfg.node_2_url,
+        node_3_url=cfg.node_3_url,
+        node_4_url=cfg.node_4_url,
+        node_5_url=cfg.node_5_url,
     )
 
 

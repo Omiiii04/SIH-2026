@@ -61,14 +61,20 @@ def _chat_response(content: str = "Hello from the test model!") -> dict:
 
 
 def _make_five_nodes(
-    text_url: str = "http://node-text:1234",
-    vision_url: str = "http://node-vision:1234",
-    reasoning_url: str = "http://node-reasoning:1234",
-    code_url: str = "http://node-code:1234",
-    rag_url: str = "http://node-rag:1234",
+    node_1_url: str = "http://node-1:1234",
+    node_2_url: str = "http://node-2:1234",
+    node_3_url: str = "http://node-3:1234",
+    node_4_url: str = "http://node-4:1234",
+    node_5_url: str = "http://node-5:1234",
 ):
     """Build a list of NodeConfigs with the given URLs."""
-    configs = _make_node_configs(text_url, vision_url, reasoning_url, code_url, rag_url)
+    configs = _make_node_configs(
+        node_1_url=node_1_url,
+        node_2_url=node_2_url,
+        node_3_url=node_3_url,
+        node_4_url=node_4_url,
+        node_5_url=node_5_url,
+    )
     return list(sorted(configs.values(), key=lambda n: n.laptop_id))
 
 

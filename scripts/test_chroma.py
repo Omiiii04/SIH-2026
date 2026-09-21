@@ -82,7 +82,7 @@ async def run(host: str, port: int, collection: str) -> int:
     test_meta  = {
         "user_id":       test_uid,
         "session_id":    "test_session",
-        "node_id":       "NODE-TEXT",
+        "node_id":       "NODE-1",
         "model":         "test-model-7b",
         "timestamp":     datetime.now(timezone.utc).isoformat(),
         "query_preview": test_query[:120],

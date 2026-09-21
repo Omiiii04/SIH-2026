@@ -134,7 +134,18 @@ async def handle_query(
     )
 
     ideal_node = get_node_by_type(cls.node_type)
-    preferred_node_id = ideal_node.node_id if ideal_node else f"NODE-{cls.node_type.value.upper()}"
+    if ideal_node:
+        preferred_node_id = ideal_node.node_id
+    else:
+        # Fallback to the new IDs if registry somehow didn't return ideal_node
+        fallback_map = {
+            NodeType.TEXT: "NODE-1",
+            NodeType.VISION: "NODE-2",
+            NodeType.REASONING: "NODE-3",
+            NodeType.CODE: "NODE-4",
+            NodeType.RAG: "NODE-5",
+        }
+        preferred_node_id = fallback_map.get(cls.node_type, "NODE-1")
 
     # Step 2: retry loop
     tried_nodes: set[str] = set()

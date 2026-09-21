@@ -11,9 +11,9 @@ are returned in the correct order.
 
 Test sequence
 ─────────────
-  1. POST /api/v1/query  "What is a transformer model?"          → expect NODE-TEXT
-  2. POST /api/v1/query  "Explain attention mechanism"           → expect NODE-TEXT
-  3. POST /api/v1/query  "How does BERT use transformers?"       → expect NODE-TEXT
+  1. POST /api/v1/query  "What is a transformer model?"          → expect NODE-1
+  2. POST /api/v1/query  "Explain attention mechanism"           → expect NODE-1
+  3. POST /api/v1/query  "How does BERT use transformers?"       → expect NODE-1
   4. Wait 2 s for fire-and-forget persist tasks
   5. POST /api/v1/memory/search  "transformer architecture"
      → expect all 3 queries to appear in results (semantic overlap)

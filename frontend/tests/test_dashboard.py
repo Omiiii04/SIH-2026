@@ -50,7 +50,7 @@ class TestDashboardLoads:
 
     def test_five_nodes_appear(self, browser_page: Page):
         """All five node cards are rendered (even if OFFLINE)."""
-        nodes = ["NODE-TEXT", "NODE-VISION", "NODE-REASONING", "NODE-CODE", "NODE-RAG"]
+        nodes = ["NODE-1", "NODE-2", "NODE-3", "NODE-4", "NODE-5"]
         for node_id in nodes:
             locator = browser_page.locator(f"#node-card-{node_id}")
             locator.wait_for(timeout=TIMEOUT)
@@ -107,28 +107,28 @@ class TestNodeStatus:
 
     def test_offline_node_visibly_marked(self, browser_page: Page):
         """
-        Force NODE-RAG offline via API, reload, confirm the card shows OFFLINE.
+        Force NODE-5 offline via API, reload, confirm the card shows OFFLINE.
         Restores the node to 'online' afterwards.
         """
         # Force offline
-        r = requests.patch(f"{API_URL}/api/v1/nodes/NODE-RAG/status?status=offline", timeout=5)
+        r = requests.patch(f"{API_URL}/api/v1/nodes/NODE-5/status?status=offline", timeout=5)
         assert r.status_code == 200
 
         browser_page.reload(wait_until="networkidle", timeout=30_000)
-        card = browser_page.locator("#node-card-NODE-RAG")
+        card = browser_page.locator("#node-card-NODE-5")
         card.wait_for(timeout=TIMEOUT)
         text = card.inner_text()
-        assert "OFFLINE" in text, f"OFFLINE not shown in NODE-RAG card:\n{text}"
+        assert "OFFLINE" in text, f"OFFLINE not shown in NODE-5 card:\n{text}"
 
         # Restore
-        requests.patch(f"{API_URL}/api/v1/nodes/NODE-RAG/status?status=online", timeout=5)
+        requests.patch(f"{API_URL}/api/v1/nodes/NODE-5/status?status=online", timeout=5)
 
     def test_fallback_displayed(self, browser_page: Page):
         """
-        Force NODE-TEXT offline, submit a text query,
+        Force NODE-1 offline, submit a text query,
         check that FaultToleranceViz shows fallback.
         """
-        requests.patch(f"{API_URL}/api/v1/nodes/NODE-TEXT/status?status=offline", timeout=5)
+        requests.patch(f"{API_URL}/api/v1/nodes/NODE-1/status?status=offline", timeout=5)
         time.sleep(1)
 
         browser_page.locator("#query-input").fill("Tell me a joke")
@@ -142,7 +142,7 @@ class TestNodeStatus:
             f"FaultToleranceViz missing offline/fallback indicator:\n{content}"
 
         # Restore
-        requests.patch(f"{API_URL}/api/v1/nodes/NODE-TEXT/status?status=online", timeout=5)
+        requests.patch(f"{API_URL}/api/v1/nodes/NODE-1/status?status=online", timeout=5)
 
 
 class TestMemorySearch:

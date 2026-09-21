@@ -285,6 +285,7 @@ class NodeStatusEntry(BaseModel):
     status:           NodeStatus
     latency_ms:       Optional[float] = None
     model_loaded:     Optional[str]   = None
+    capacity:         Optional[str]   = None
     last_checked:     Optional[datetime] = None
     last_success:     Optional[datetime] = None
 

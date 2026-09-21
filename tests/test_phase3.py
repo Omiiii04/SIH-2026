@@ -73,58 +73,58 @@ def _fake_lm(content: str = "OK response.") -> LMResponse:
 class TestClassifierRequiredCases:
 
     def test_case1_what_is_python_routes_to_text(self):
-        """'What is Python?' → NODE-TEXT (general QA, no code keyword match)."""
+        """'What is Python?' → NODE-1 (general QA, no code keyword match)."""
         r = classify_sync("What is Python?", InputType.TEXT)
         # "python" is a coding keyword, so this WILL route to CODE — which is
         # actually the right behaviour: the user is asking about the language.
-        # The spec says NODE-TEXT for this query; since "python" fires coding,
+        # The spec says NODE-1 for this query; since "python" fires coding,
         # we verify the capability is coding (correct) OR text if the query is
         # judged general. Let's check it actually goes to CODE as our rules say.
         assert r.node_type in (NodeType.CODE, NodeType.TEXT)
 
     def test_case1_general_greeting_routes_to_text(self):
-        """A pure general-knowledge query with no domain keywords → NODE-TEXT."""
+        """A pure general-knowledge query with no domain keywords → NODE-1."""
         r = classify_sync("What is the capital of France?", InputType.TEXT)
         assert r.node_type == NodeType.TEXT
         assert r.task_type == TaskType.GENERAL_QA
 
     def test_case2_write_fastapi_endpoint_routes_to_code(self):
-        """'Write a FastAPI endpoint.' → NODE-CODE."""
+        """'Write a FastAPI endpoint.' → NODE-4."""
         r = classify_sync("Write a FastAPI endpoint.", InputType.TEXT)
         assert r.node_type == NodeType.CODE
         assert r.task_type in (TaskType.CODING, TaskType.CODE_DEBUG, TaskType.CODE_REVIEW)
 
     def test_case3_explain_image_routes_to_vision(self):
-        """'Explain this image.' with input_type=IMAGE → NODE-VISION."""
+        """'Explain this image.' with input_type=IMAGE → NODE-2."""
         r = classify_sync("Explain this image.", InputType.IMAGE)
         assert r.node_type == NodeType.VISION
         assert r.required_capability == "vision"
 
     def test_case3_image_keyword_in_text_routes_to_vision(self):
-        """'Explain what is shown in this image.' (text) → NODE-VISION by keyword."""
+        """'Explain what is shown in this image.' (text) → NODE-2 by keyword."""
         r = classify_sync("Explain what is shown in this image.", InputType.TEXT)
         assert r.node_type == NodeType.VISION
 
     def test_case4_hard_reasoning_routes_to_reasoning(self):
-        """A difficult reasoning problem → NODE-REASONING, difficulty=HIGH."""
+        """A difficult reasoning problem → NODE-3, difficulty=HIGH."""
         q = "Prove step by step that the square root of 2 is irrational using a formal proof."
         r = classify_sync(q, InputType.TEXT)
         assert r.node_type == NodeType.REASONING
         assert r.difficulty == Difficulty.HIGH
 
     def test_case4_reasoning_keyword_query(self):
-        """'Analyse the root causes of…' → NODE-REASONING."""
+        """'Analyse the root causes of…' → NODE-3."""
         r = classify_sync("Analyse the root causes of the 2008 financial crisis.", InputType.TEXT)
         assert r.node_type == NodeType.REASONING
 
     def test_case5_search_document_routes_to_rag(self):
-        """An embedding/search request → NODE-RAG."""
+        """An embedding/search request → NODE-5."""
         r = classify_sync("Search the knowledge base and retrieve relevant documents.", InputType.TEXT)
         assert r.node_type == NodeType.RAG
         assert r.required_capability == "embedding/retrieval"
 
     def test_case5_retrieval_input_type_routes_to_rag(self):
-        """input_type=retrieval → NODE-RAG regardless of query text."""
+        """input_type=retrieval → NODE-5 regardless of query text."""
         r = classify_sync("Find stuff", InputType.RETRIEVAL)
         assert r.node_type == NodeType.RAG
 
@@ -223,7 +223,7 @@ class TestClassifierLLM:
 
         with patch("orchestrator.node_registry.get_node_by_type") as mock_get, \
              patch("orchestrator.lm_client.call_node", new_callable=AsyncMock) as mock_call:
-            # Simulate NODE-TEXT configured but call fails
+            # Simulate NODE-1 configured but call fails
             mock_node = MagicMock()
             mock_node.endpoint = "http://fake:1234"
             mock_node.model = "test-model"
@@ -247,11 +247,11 @@ class TestClassifierLLM:
 class TestRegistry:
 
     def test_set_node_status_online(self):
-        ok = set_node_status("NODE-TEXT", "online")
+        ok = set_node_status("NODE-1", "online")
         assert ok is True
 
     def test_set_node_status_offline(self):
-        ok = set_node_status("NODE-TEXT", "offline")
+        ok = set_node_status("NODE-1", "offline")
         assert ok is True
 
     def test_set_node_status_unknown_id(self):
@@ -260,33 +260,33 @@ class TestRegistry:
 
     def test_get_online_node_skips_offline(self):
         """When primary is offline, get_online_node_for_capability returns fallback."""
-        # Mark NODE-REASONING offline
-        set_node_status("NODE-REASONING", "offline")
-        # Reasoning capability falls back to NODE-TEXT (per _CAPABILITY_FALLBACK_ORDER)
+        # Mark NODE-3 offline
+        set_node_status("NODE-3", "offline")
+        # Reasoning capability falls back to NODE-1 (per _CAPABILITY_FALLBACK_ORDER)
         node = get_online_node_for_capability("reasoning")
         assert node is not None
-        assert node.node_id != "NODE-REASONING"
+        assert node.node_id != "NODE-3"
 
     def test_get_online_node_returns_primary_when_online(self):
         """When the primary node is online, it should be returned."""
-        set_node_status("NODE-TEXT", "online")
+        set_node_status("NODE-1", "online")
         node = get_online_node_for_capability("text")
         assert node is not None
-        assert node.node_id == "NODE-TEXT"
+        assert node.node_id == "NODE-1"
 
     def test_get_online_node_returns_none_when_all_offline(self):
         """If all candidates for a capability are offline, return None."""
-        set_node_status("NODE-VISION", "offline")
+        set_node_status("NODE-2", "offline")
         # Vision has no fallback in the order (only vision nodes)
         node = get_online_node_for_capability("vision")
         assert node is None
 
     def test_reset_registry_clears_status(self):
-        set_node_status("NODE-TEXT", "offline")
+        set_node_status("NODE-1", "offline")
         reset_registry()
         # After reset, status goes back to initial ("unknown" since URL is configured)
         from orchestrator.node_registry import get_node_by_id
-        node = get_node_by_id("NODE-TEXT")
+        node = get_node_by_id("NODE-1")
         assert node.status != "offline"
 
 
@@ -299,7 +299,7 @@ class TestRouter:
     @pytest.mark.asyncio
     async def test_routing_decision_present_in_response(self):
         req = QueryRequest(user_id="u1", query="Write a Python function", input_type=InputType.TEXT)
-        set_node_status("NODE-CODE", "online")
+        set_node_status("NODE-4", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm("def f(): pass")
             from orchestrator.router import handle_query
@@ -314,7 +314,7 @@ class TestRouter:
     async def test_routing_was_fallback_false_for_primary(self):
         """When the primary node is online, was_fallback must be False."""
         req = QueryRequest(user_id="u1", query="Tell me a joke", input_type=InputType.TEXT)
-        set_node_status("NODE-TEXT", "online")
+        set_node_status("NODE-1", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm("Why did the chicken cross the road?")
             from orchestrator.router import handle_query
@@ -325,9 +325,9 @@ class TestRouter:
 
     @pytest.mark.asyncio
     async def test_routing_was_fallback_true_when_primary_offline(self):
-        """When primary (NODE-CODE) is offline, falls back to NODE-TEXT; was_fallback=True."""
-        set_node_status("NODE-CODE", "offline")
-        set_node_status("NODE-TEXT", "online")
+        """When primary (NODE-4) is offline, falls back to NODE-1; was_fallback=True."""
+        set_node_status("NODE-4", "offline")
+        set_node_status("NODE-1", "online")
         req = QueryRequest(user_id="u1", query="write a python function", input_type=InputType.TEXT)
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm("def f(): pass")
@@ -336,13 +336,13 @@ class TestRouter:
         from orchestrator.schemas import QueryResponse
         assert isinstance(result, QueryResponse)
         assert result.routing.was_fallback is True
-        assert result.selected_node == "NODE-TEXT"
+        assert result.selected_node == "NODE-1"
 
     @pytest.mark.asyncio
     async def test_no_available_node_returns_node_failure(self):
         """If all nodes for a capability are offline, return NodeFailureResponse."""
-        # Mark NODE-VISION offline (no fallback exists for vision)
-        set_node_status("NODE-VISION", "offline")
+        # Mark NODE-2 offline (no fallback exists for vision)
+        set_node_status("NODE-2", "offline")
         req = QueryRequest(user_id="u1", query="Describe this image", input_type=InputType.IMAGE)
         with patch("orchestrator.router.call_node", new_callable=AsyncMock):
             from orchestrator.router import handle_query
@@ -356,7 +356,7 @@ class TestRouter:
     async def test_node_failure_routing_explanation_present(self):
         """NodeFailureResponse must contain a routing explanation."""
         req = QueryRequest(user_id="u1", query="hello", input_type=InputType.TEXT)
-        set_node_status("NODE-TEXT", "online")
+        set_node_status("NODE-1", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.side_effect = LMClientError("connection_error", "Refused", 5.0)
             from orchestrator.router import handle_query
@@ -369,14 +369,14 @@ class TestRouter:
     @pytest.mark.asyncio
     async def test_connection_error_marks_node_offline(self):
         """After a connection error, the node's status in the registry becomes 'offline'."""
-        set_node_status("NODE-TEXT", "online")
+        set_node_status("NODE-1", "online")
         req = QueryRequest(user_id="u1", query="hello", input_type=InputType.TEXT)
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.side_effect = LMClientError("connection_error", "Refused", 5.0)
             from orchestrator.router import handle_query
             await handle_query(req)
         from orchestrator.node_registry import get_node_by_id
-        node = get_node_by_id("NODE-TEXT")
+        node = get_node_by_id("NODE-1")
         assert node.status == "offline"
 
 
@@ -388,7 +388,7 @@ class TestQueryEndpointPhase3:
 
     @pytest.mark.asyncio
     async def test_response_contains_routing_block(self, client):
-        set_node_status("NODE-CODE", "online")
+        set_node_status("NODE-4", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm("def f(): pass")
             resp = await client.post("/api/v1/query", json={
@@ -405,7 +405,7 @@ class TestQueryEndpointPhase3:
 
     @pytest.mark.asyncio
     async def test_classification_has_task_type(self, client):
-        set_node_status("NODE-TEXT", "online")
+        set_node_status("NODE-1", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm("Sure!")
             resp = await client.post("/api/v1/query", json={
@@ -424,8 +424,8 @@ class TestQueryEndpointPhase3:
     @pytest.mark.asyncio
     async def test_offline_fallback_visible_in_response(self, client):
         """was_fallback=True in routing when primary node is offline."""
-        set_node_status("NODE-CODE", "offline")
-        set_node_status("NODE-TEXT", "online")
+        set_node_status("NODE-4", "offline")
+        set_node_status("NODE-1", "online")
         with patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = _fake_lm("def f(): pass")
             resp = await client.post("/api/v1/query", json={
@@ -440,7 +440,7 @@ class TestQueryEndpointPhase3:
     @pytest.mark.asyncio
     async def test_no_node_returns_503_with_routing(self, client):
         """503 response when all candidate nodes are offline."""
-        set_node_status("NODE-VISION", "offline")
+        set_node_status("NODE-2", "offline")
         resp = await client.post("/api/v1/query", json={
             "user_id": "u1",
             "query": "Describe this image",
@@ -460,14 +460,17 @@ class TestNodeStatusEndpoint:
 
     @pytest.mark.asyncio
     async def test_patch_status_returns_200(self, client):
-        resp = await client.patch("/api/v1/nodes/NODE-TEXT/status?status=offline")
+        resp = await client.patch("/api/v1/nodes/NODE-1/status?status=offline")
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
     async def test_patch_status_updates_registry(self, client):
-        await client.patch("/api/v1/nodes/NODE-TEXT/status?status=offline")
+        resp = await client.patch("/api/v1/nodes/NODE-1/status?status=offline")
+        assert resp.status_code == 200
+
+        # Verify it reflects in the next GET
         nodes_resp = await client.get("/api/v1/nodes")
-        node_text = next(n for n in nodes_resp.json() if n["node_id"] == "NODE-TEXT")
+        node_text = next(n for n in nodes_resp.json()["nodes"] if n["node_id"] == "NODE-1")
         assert node_text["status"] == "offline"
 
     @pytest.mark.asyncio

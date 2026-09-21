@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import re
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -26,6 +27,7 @@ class NodeState:
     status:        NodeStatus = NodeStatus.OFFLINE
     latency_ms:    Optional[float] = None
     model_loaded:  Optional[str]   = None
+    capacity:      Optional[str]   = None
     last_checked:  Optional[datetime] = None
     last_success:  Optional[datetime] = None
 
@@ -41,6 +43,7 @@ def get_node_status_entries() -> list[NodeStatusEntry]:
             status=s.status,
             latency_ms=s.latency_ms,
             model_loaded=s.model_loaded,
+            capacity=s.capacity,
             last_checked=s.last_checked,
             last_success=s.last_success,
         )
@@ -66,11 +69,17 @@ async def _probe(client: httpx.AsyncClient, node_id: str, base_url: str) -> None
         resp = await client.get(probe_url, timeout=PROBE_TIMEOUT)
         latency_ms = (time.monotonic() - t0) * 1000
         model_loaded: Optional[str] = None
+        capacity: Optional[str] = None
         if resp.status_code == 200:
             data = resp.json()
             models = data.get("data", [])
             if models:
                 model_loaded = models[0].get("id")
+                # Attempt to extract capacity e.g. "8b", "7.5B"
+                if model_loaded:
+                    match = re.search(r'([\d\.]+[bB])', model_loaded)
+                    if match:
+                        capacity = match.group(1).upper() + " Params"
             status = NodeStatus.DEGRADED if latency_ms > DEGRADED_THRESHOLD_MS else NodeStatus.ONLINE
             registry_status = "online"
             last_success = now
@@ -85,7 +94,7 @@ async def _probe(client: httpx.AsyncClient, node_id: str, base_url: str) -> None
         state = _NODE_STATES.get(node_id, NodeState(node_id=node_id))
         _NODE_STATES[node_id] = NodeState(
             node_id=node_id, status=status, latency_ms=round(latency_ms, 1),
-            model_loaded=model_loaded, last_checked=now,
+            model_loaded=model_loaded, capacity=capacity, last_checked=now,
             last_success=last_success if status != NodeStatus.OFFLINE else state.last_success,
         )
         set_node_status(node_id, registry_status)
@@ -95,7 +104,7 @@ async def _probe(client: httpx.AsyncClient, node_id: str, base_url: str) -> None
         old = _NODE_STATES.get(node_id, NodeState(node_id=node_id))
         _NODE_STATES[node_id] = NodeState(
             node_id=node_id, status=NodeStatus.OFFLINE, latency_ms=round(latency_ms, 1),
-            model_loaded=None, last_checked=now, last_success=old.last_success,
+            model_loaded=None, capacity=None, last_checked=now, last_success=old.last_success,
         )
         set_node_status(node_id, "offline")
 
