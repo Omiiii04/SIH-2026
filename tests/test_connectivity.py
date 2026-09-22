@@ -173,11 +173,11 @@ async def test_scenario2_node_text_offline():
 
     by_id = {r.node_id: r for r in results}
 
-    # NODE-TEXT must be OFFLINE
-    assert not by_id["NODE-TEXT"].is_online, "NODE-TEXT should be OFFLINE"
+    # NODE-1 (text) must be OFFLINE
+    assert not by_id["NODE-1"].is_online, "NODE-1 should be OFFLINE"
 
     # All others must be ONLINE
-    for node_id in ("NODE-VISION", "NODE-REASONING", "NODE-CODE", "NODE-RAG"):
+    for node_id in ("NODE-2", "NODE-3", "NODE-4", "NODE-5"):
         assert by_id[node_id].is_online, f"{node_id} should be ONLINE"
 
     online_count = sum(1 for r in results if r.is_online)
@@ -208,7 +208,7 @@ async def test_scenario2_offline_node_has_error_message():
     async with httpx.AsyncClient(transport=transport) as client:
         results = [await probe_reachability(client, n, timeout=5.0) for n in nodes]
 
-    text_result = next(r for r in results if r.node_id == "NODE-TEXT")
+    text_result = next(r for r in results if r.node_id == "NODE-1")
     assert text_result.error is not None
     assert len(text_result.error) > 0
 
@@ -228,7 +228,7 @@ async def test_scenario3_node_text_recovers():
         results = [await probe_reachability(client, n, timeout=5.0) for n in nodes]
 
     by_id = {r.node_id: r for r in results}
-    assert by_id["NODE-TEXT"].is_online, "NODE-TEXT should be back ONLINE"
+    assert by_id["NODE-1"].is_online, "NODE-1 should be back ONLINE"
 
     online_count = sum(1 for r in results if r.is_online)
     assert online_count == 5, f"Expected 5 online after recovery, got {online_count}"
@@ -303,11 +303,11 @@ async def test_scenario4_offline_node_skipped_gracefully():
 async def test_unconfigured_node_is_marked_not_configured():
     """An empty endpoint string must produce is_configured=False and no network call."""
     nodes = _make_node_configs(
-        text_url="http://configured:1234",
-        vision_url="",   # not set up yet
-        reasoning_url="",
-        code_url="",
-        rag_url="",
+        node_1_url="http://configured:1234",
+        node_2_url="",   # not set up yet
+        node_3_url="",
+        node_4_url="",
+        node_5_url="",
     )
     transport = FakeLMStudioTransport()
 
@@ -317,10 +317,10 @@ async def test_unconfigured_node_is_marked_not_configured():
             results.append(await probe_reachability(client, cfg, timeout=5.0))
 
     by_id = {r.node_id: r for r in results}
-    assert by_id["NODE-TEXT"].is_configured
-    assert by_id["NODE-TEXT"].is_online
+    assert by_id["NODE-1"].is_configured
+    assert by_id["NODE-1"].is_online
 
-    for node_id in ("NODE-VISION", "NODE-REASONING", "NODE-CODE", "NODE-RAG"):
+    for node_id in ("NODE-2", "NODE-3", "NODE-4", "NODE-5"):
         assert not by_id[node_id].is_configured
         assert not by_id[node_id].is_online
 
@@ -329,11 +329,11 @@ async def test_unconfigured_node_is_marked_not_configured():
 async def test_unconfigured_nodes_do_not_block_configured_ones():
     """4 unconfigured nodes must not prevent the 1 configured node from succeeding."""
     nodes = _make_node_configs(
-        text_url="http://configured:1234",
-        vision_url="",
-        reasoning_url="",
-        code_url="",
-        rag_url="",
+        node_1_url="http://configured:1234",
+        node_2_url="",
+        node_3_url="",
+        node_4_url="",
+        node_5_url="",
     )
     transport = FakeLMStudioTransport()
 
@@ -342,4 +342,4 @@ async def test_unconfigured_nodes_do_not_block_configured_ones():
 
     online = [r for r in results if r.is_online]
     assert len(online) == 1
-    assert online[0].node_id == "NODE-TEXT"
+    assert online[0].node_id == "NODE-1"

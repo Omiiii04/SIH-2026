@@ -4,12 +4,12 @@ import { useRef, useEffect } from "react";
 import { ChatMessage, type MessageData } from "./ChatMessage";
 import { Bot } from "lucide-react";
 
-export function ChatContainer({ 
-  messages, 
+export function ChatContainer({
+  messages,
   loading,
   onExampleClick
-}: { 
-  messages: MessageData[]; 
+}: {
+  messages: MessageData[];
   loading: boolean;
   onExampleClick?: (query: string, type: string) => void;
 }) {
@@ -23,9 +23,9 @@ export function ChatContainer({
     return (
       <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-8 px-4">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-2 shadow-sm animate-in fade-in zoom-in duration-500">
+          {/* <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mb-2 shadow-sm animate-in fade-in zoom-in duration-500">
             <Bot size={28} />
-          </div>
+          </div> */}
           <h2 className="text-2xl font-semibold text-foreground tracking-tight">What can I help you with?</h2>
           <p className="text-sm max-w-md text-center opacity-70">
             Route your queries automatically across the 5-node inference mesh.

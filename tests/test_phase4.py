@@ -99,7 +99,10 @@ def _fake_query_response(
         selected_node=node,
         selected_model="test-model-7b",
         response="Transformers are attention-based models.",
-        latency_ms=42.0,
+        total_ms=42.0,
+        classification_ms=2.0,
+        routing_ms=1.0,
+        inference_ms=39.0,
     )
 
 
@@ -155,7 +158,10 @@ class TestPersistSuccess:
             selected_node="NODE-1",
             error_type="connection_error",
             detail="refused",
-            latency_ms=5.0,
+            total_ms=5.0,
+            classification_ms=0.5,
+            routing_ms=0.2,
+            inference_ms=4.3,
         )
         request = QueryRequest(user_id="test_user_001", query="hello", input_type=InputType.TEXT)
 

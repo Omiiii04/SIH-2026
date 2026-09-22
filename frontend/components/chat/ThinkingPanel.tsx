@@ -48,7 +48,7 @@ export function ThinkingPanel({ result, ok }: ThinkingPanelProps) {
                 <AlertTriangle size={14} />
                 Node Failure
               </div>
-              <div>{failData.error_type}: {failData.detail}</div>
+              <div>{String(failData.error_type ?? "")}{failData.detail ? `: ${typeof failData.detail === "string" ? failData.detail : JSON.stringify(failData.detail)}` : ""}</div>
             </div>
           )}
 

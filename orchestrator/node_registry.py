@@ -31,7 +31,10 @@ logger = logging.getLogger(__name__)
 
 _CAPABILITY_FALLBACK_ORDER: Dict[str, List[NodeType]] = {
     "text":                [NodeType.TEXT, NodeType.REASONING],
-    "vision":              [NodeType.VISION],                        # no text fallback for images
+    # Vision falls back to TEXT/REASONING when NODE-2 is offline or times out.
+    # Text nodes cannot process image pixels, but can still respond to the
+    # filename/description text that was sent as the query.
+    "vision":              [NodeType.VISION, NodeType.TEXT, NodeType.REASONING],
     "coding":              [NodeType.CODE, NodeType.TEXT],
     "reasoning":           [NodeType.REASONING, NodeType.TEXT],
     "embedding/retrieval": [NodeType.RAG, NodeType.TEXT],
@@ -156,17 +159,25 @@ def get_nodes_by_capability(capability: str) -> List[NodeRegistryEntry]:
     return sorted(nodes, key=lambda n: n.priority)
 
 
-def get_online_node_for_capability(capability: str) -> Optional[NodeRegistryEntry]:
+def get_online_node_for_capability(
+    capability: str,
+    skip_ids: set[str] | None = None,
+) -> Optional[NodeRegistryEntry]:
     """
     Return the highest-priority ONLINE node for a required capability.
     Falls back through _CAPABILITY_FALLBACK_ORDER when the primary is offline.
+    Nodes whose IDs appear in *skip_ids* are excluded (used by the router retry
+    loop to bypass already-attempted nodes regardless of their registry status).
     Returns None if no suitable online node exists.
     """
     fallback_types = _CAPABILITY_FALLBACK_ORDER.get(capability, [])
+    _skip = skip_ids or set()
 
     for node_type in fallback_types:
         node_id = _TYPE_TO_NODE_ID.get(node_type)
         if not node_id:
+            continue
+        if node_id in _skip:
             continue
         node = _REGISTRY.get(node_id)
         if node and node.status not in ("offline", "not_configured"):

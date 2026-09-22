@@ -105,6 +105,10 @@ async def handle_query(
     Retries up to cfg.http_max_retries times across available nodes.
     Dead nodes are marked offline so the next retry picks a different one.
     Records routing_ms, inference_ms, total_ms, retry_count, fallback, status.
+
+    Vision requests use a shorter per-node timeout (15 s) so that a text model
+    accidentally receiving an image query fails fast and the fallback chain
+    (TEXT / REASONING) is reached quickly.
     """
     from orchestrator.config import get_settings
     from orchestrator.monitor import RequestRecord, record_request
@@ -122,7 +126,7 @@ async def handle_query(
 
     # Step 1: classify
     t_class_start = time.monotonic()
-    cls: ClassificationResult = await classify(request.query, request.input_type)
+    cls: ClassificationResult = await classify(request.query, request.input_type, request_id=request_id)
     classification_ms = (time.monotonic() - t_class_start) * 1000
 
     logger.info(
@@ -152,10 +156,10 @@ async def handle_query(
     routing: RoutingDecision | None = None
 
     for attempt in range(MAX_RETRIES):
-        node = get_online_node_for_capability(cls.required_capability)
+        node = get_online_node_for_capability(cls.required_capability, skip_ids=tried_nodes)
 
         # No more fresh nodes (all tried or all offline)
-        if node is None or node.node_id in tried_nodes:
+        if node is None:
             logger.warning(
                 "[%s] No fresh online node for capability=%s (attempt %d)",
                 request_id, cls.required_capability, attempt + 1,
@@ -175,13 +179,23 @@ async def handle_query(
         # node.model is populated by the health monitor from GET /v1/models.
         # If it's still empty (node came online between probes), pass "" —
         # LM Studio will use whichever model it currently has loaded.
+        # Use a shorter per-node timeout for vision capability:
+        # NODE-2 runs a text model that hangs forever on image payloads.
+        # 15s is enough for a real vision model; text fallback gets the full timeout.
+        node_timeout = 15.0 if (
+            cls.required_capability == "vision" and node.node_type == NodeType.VISION
+        ) else timeout
+
         try:
             lm_resp: LMResponse = await call_node(
                 endpoint=node.endpoint,
                 model=node.model,   # live model id, e.g. "gemma-4-e4b-it-qat"
                 query=request.query,
                 parameters=request.parameters,
-                timeout=timeout,
+                timeout=node_timeout,
+                request_id=request_id,
+                attempt=attempt + 1,
+                node_id=node.node_id,
             )
         except LMClientError as exc:
             last_exc = exc

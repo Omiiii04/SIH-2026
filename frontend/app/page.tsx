@@ -41,15 +41,22 @@ export default function DashboardPage() {
   }, [messages, history, isClient]);
 
   const handleSend = useCallback(async (query: string, inputType: string, imageFile: File | null) => {
+    // Build the effective query text FIRST so the user bubble is never blank.
+    // Backend requires min_length=1, so we substitute a descriptive placeholder.
+    const effectiveQuery = query.trim() ||
+      (imageFile ? `📎 ${imageFile.name}` : "[File attached]");
+    const effectiveInputType =
+      imageFile?.type.startsWith("image/") ? "image" : inputType;
+
     const userMsgId = crypto.randomUUID();
-    setMessages(prev => [...prev, { id: userMsgId, role: "user", content: query }]);
+    setMessages(prev => [...prev, { id: userMsgId, role: "user", content: effectiveQuery }]);
     setLoading(true);
 
     try {
       const { ok, data } = await submitQuery({
         user_id: "dashboard-user",
-        query: query,
-        input_type: inputType,
+        query: effectiveQuery,
+        input_type: effectiveInputType,
         session_id: sessionId,
       });
 
@@ -70,7 +77,7 @@ export default function DashboardPage() {
       setHistory(prev => [{
         request_id: qr.request_id ?? crypto.randomUUID(),
         timestamp: new Date().toISOString(),
-        query: query,
+        query: effectiveQuery,
         selected_node: qr.selected_node ?? fail.selected_node ?? "—",
         total_ms: qr.total_ms ?? fail.total_ms ?? 0,
         status: (ok ? "success" : "error") as "success" | "error",

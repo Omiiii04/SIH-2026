@@ -187,9 +187,9 @@ class ClassificationResult(BaseModel):
 
     # Phase 3 additions
     task_type: TaskType = TaskType.UNKNOWN
-    difficulty: Difficulty = Field(default=Difficulty.MEDIUM, exclude=True)
+    difficulty: Difficulty = Difficulty.MEDIUM
     required_capability: str = "text"           # matches NodeRegistryEntry.capability
-    confidence: float = Field(default=1.0, exclude=True)                     # 0.0–1.0
+    confidence: float = 1.0                     # 0.0–1.0
     classifier_method: ClassifierMethod = ClassifierMethod.RULE_DEFAULT
 
 

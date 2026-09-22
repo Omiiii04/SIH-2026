@@ -133,7 +133,13 @@ export function ChatComposer({ onSend, loading }: Props) {
           <Textarea
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={inputType !== 'text' ? "" : "Ask anything..."}
+            placeholder={
+              file
+                ? "Describe the image, or press Send to use the filename as the query…"
+                : inputType !== "text"
+                ? ""
+                : "Ask anything..."
+            }
             className={`min-h-[44px] max-h-[200px] resize-none bg-transparent border-0 focus-visible:ring-0 p-3 py-2.5 text-sm shadow-none ${inputType !== 'text' && !query ? 'indent-24' : ''}`}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); }

@@ -90,14 +90,19 @@ def _build_payload(
 ) -> Dict[str, Any]:
     """Build the full chat/completions request body."""
     params = parameters or {}
-    return {
-        "model": model,
+    payload: Dict[str, Any] = {
         "messages": _build_messages(query, system_prompt, context),
         "max_tokens":   params.get("max_tokens",   512),
         "temperature":  params.get("temperature",  0.7),
         "top_p":        params.get("top_p",        0.95),
         "stream":       False,
     }
+    # Only include model key when a non-empty model ID is available.
+    # LM Studio uses the currently-loaded model when the field is absent.
+    # Sending model="" causes HTTP 400 "Invalid model identifier".
+    if model:
+        payload["model"] = model
+    return payload
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -113,6 +118,9 @@ async def call_node(
     context: Optional[List[Dict[str, Any]]] = None,
     parameters: Optional[Dict[str, Any]] = None,
     timeout: float = 30.0,
+    request_id: Optional[str] = None,
+    attempt: Optional[int] = None,
+    node_id: Optional[str] = None,
 ) -> LMResponse:
     """
     Send a chat-completion request to the LM Studio node at *endpoint*.
@@ -144,7 +152,11 @@ async def call_node(
     chat_url = f"{endpoint.rstrip('/')}/v1/chat/completions"
     payload = _build_payload(model, query, system_prompt, context, parameters)
 
-    logger.info("LM call → %s  model=%s  query_len=%d", chat_url, model, len(query))
+    prefix = f"[{request_id}] " if request_id else ""
+    attempt_str = f" (Attempt {attempt})" if attempt else ""
+    n_id = f" (node={node_id})" if node_id else ""
+    
+    logger.info("%sLM call → %s%s%s  model=%s  query_len=%d", prefix, chat_url, n_id, attempt_str, model, len(query))
 
     t0 = time.monotonic()
     try:
@@ -177,8 +189,8 @@ async def call_node(
         actual_model = data.get("model", model)
 
         logger.info(
-            "LM response received  node=%s  latency=%.1f ms  tokens=%s",
-            endpoint, latency_ms, usage.get("total_tokens"),
+            "%sLM response received  node=%s  latency=%.1f ms  tokens=%s",
+            prefix, endpoint, latency_ms, usage.get("total_tokens"),
         )
 
         return LMResponse(

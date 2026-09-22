@@ -371,6 +371,7 @@ async def _classify_via_llm(
     query: str,
     input_type: InputType,
     fallback: ClassificationResult,
+    request_id: Optional[str] = None,
 ) -> ClassificationResult:
     """
     Call NODE-TEXT to classify the query as structured JSON.
@@ -393,6 +394,7 @@ async def _classify_via_llm(
             system_prompt=_LLM_SYSTEM_PROMPT,
             parameters={"max_tokens": 128, "temperature": 0.0},
             timeout=15.0,
+            request_id=request_id,
         )
         data = _parse_llm_json(lm_resp.content)
         if data is None:
@@ -417,7 +419,7 @@ async def _classify_via_llm(
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def classify(query: str, input_type: InputType) -> ClassificationResult:
+async def classify(query: str, input_type: InputType, request_id: Optional[str] = None) -> ClassificationResult:
     """
     Hybrid classifier entry point (async).
 
@@ -447,7 +449,7 @@ async def classify(query: str, input_type: InputType) -> ClassificationResult:
         "Stage1 confidence %.2f < %.2f — escalating to LLM classifier",
         stage1.confidence, _RULE_CONFIDENCE_THRESHOLD,
     )
-    return await _classify_via_llm(query, input_type, fallback=stage1)
+    return await _classify_via_llm(query, input_type, fallback=stage1, request_id=request_id)
 
 
 def classify_sync(query: str, input_type: InputType) -> ClassificationResult:

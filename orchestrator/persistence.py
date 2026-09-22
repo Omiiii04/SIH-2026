@@ -66,7 +66,7 @@ async def _write_postgres_success(
             selected_node  = response.selected_node,
             selected_model = response.selected_model,
             status         = "success",
-            latency_ms     = response.latency_ms,
+            latency_ms     = response.total_ms,
             created_at     = datetime.now(timezone.utc).replace(tzinfo=None),
         )
         session.add(req_row)
@@ -110,7 +110,7 @@ async def _write_postgres_failure(
             input_type     = request.input_type.value,
             selected_node  = response.selected_node,
             status         = response.error_type,   # connection_error / timeout / …
-            latency_ms     = response.latency_ms,
+            latency_ms     = response.inference_ms,
             created_at     = datetime.now(timezone.utc).replace(tzinfo=None),
         )
         session.add(req_row)
