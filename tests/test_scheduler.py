@@ -5,7 +5,7 @@ Tests for capability-based scheduling logic.
 """
 import pytest
 from orchestrator.scheduler import select_best_candidates
-from orchestrator.schemas import ClassificationResult, NodeRegistryEntry, NodeType, InputType, TaskType, Difficulty
+from orchestrator.schemas import ClassificationResult, NodeRegistryEntry, NodeType, InputType, TaskType, Difficulty, ClassifierMethod
 from orchestrator.monitor import NodeState
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def _create_classification(caps: list[str], mods: list[str]) -> ClassificationRe
         difficulty=Difficulty.LOW,
         required_capability=",".join(caps),
         confidence=0.9,
-        classifier_method="mock",
+        classifier_method=ClassifierMethod.RULE_KEYWORD,
         matched_rule="mock",
         required_capabilities=caps,
         input_modalities=mods,

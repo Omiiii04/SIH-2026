@@ -31,7 +31,7 @@ async def test_get_nodes(mock_db_nodes):
         # We need to mock the get_session to return our mock nodes
         # But wait, GET /api/v1/nodes reads from orchestrator.node_registry or DB directly?
         # Let's mock the actual endpoint logic. If it reads from DB:
-        with patch("orchestrator.main.get_session") as mock_sess_ctx:
+        with patch("database.postgres.get_session") as mock_sess_ctx:
             mock_session = AsyncMock()
             # mock_session.execute().unique().scalars().all() -> mock_db_nodes
             mock_execute = AsyncMock()
@@ -63,7 +63,7 @@ async def test_sync_nodes_endpoint():
             
         assert resp.status_code == 200
         mock_reconcile.assert_awaited_once()
-        assert resp.json()["status"] == "success"
+        assert resp.json()["reconciled"] is True
 
 @pytest.mark.asyncio
 async def test_probe_node_endpoint():

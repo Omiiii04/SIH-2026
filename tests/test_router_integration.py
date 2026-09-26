@@ -33,7 +33,7 @@ def _mock_candidates(mock_node_id="NODE-ANY", score=10.0):
 @pytest.mark.asyncio
 async def test_router_success_flow():
     with patch("orchestrator.router.classify", new_callable=AsyncMock) as mock_classify, \
-         patch("orchestrator.router.select_best_candidates", return_value=_mock_candidates()) as mock_scheduler, \
+         patch("orchestrator.scheduler.select_best_candidates", return_value=_mock_candidates()) as mock_scheduler, \
          patch("orchestrator.router.call_node", new_callable=AsyncMock) as mock_call, \
          patch("orchestrator.persistence.persist_success", new_callable=AsyncMock), \
          patch("database.postgres.init_db", new_callable=AsyncMock), \
@@ -92,7 +92,7 @@ async def test_router_retry_on_failure():
     ]
     
     with patch("orchestrator.router.classify", new_callable=AsyncMock) as mock_classify, \
-         patch("orchestrator.router.select_best_candidates", side_effect=scheduler_side_effect) as mock_scheduler, \
+         patch("orchestrator.scheduler.select_best_candidates", side_effect=scheduler_side_effect) as mock_scheduler, \
          patch("orchestrator.router.call_node", side_effect=call_node_side_effect, new_callable=AsyncMock) as mock_call, \
          patch("orchestrator.router.set_node_status") as mock_set_status, \
          patch("orchestrator.persistence.persist_success", new_callable=AsyncMock), \
@@ -135,7 +135,7 @@ async def test_router_exhausts_retries():
     ]
     
     with patch("orchestrator.router.classify", new_callable=AsyncMock) as mock_classify, \
-         patch("orchestrator.router.select_best_candidates", side_effect=scheduler_side_effect) as mock_scheduler, \
+         patch("orchestrator.scheduler.select_best_candidates", side_effect=scheduler_side_effect) as mock_scheduler, \
          patch("orchestrator.router.call_node", side_effect=LMClientError("connection_error", "refused", 10.0), new_callable=AsyncMock) as mock_call, \
          patch("orchestrator.router.set_node_status"), \
          patch("orchestrator.persistence.persist_failure", new_callable=AsyncMock), \

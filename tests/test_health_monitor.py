@@ -15,26 +15,34 @@ def mock_registry():
     }
 
 @pytest.mark.asyncio
-async def test_health_check_cycle(mock_registry):
-    from orchestrator.monitor import _health_check_cycle
-    from orchestrator.node_manager import probe_node
+async def test_probe_updates_state(mock_registry):
+    from orchestrator.monitor import _probe, get_node_states
+    import httpx
+    from datetime import datetime, timezone
     
-    # We want to mock probe_node so we don't actually hit the network or DB
-    with patch("orchestrator.monitor.get_registry", return_value=mock_registry), \
-         patch("orchestrator.node_manager.probe_node", new_callable=AsyncMock) as mock_probe, \
-         patch("orchestrator.monitor.set_node_state") as mock_set_state:
+    # We want to mock the httpx client get call
+    client = AsyncMock(spec=httpx.AsyncClient)
+    
+    # Create a mock response
+    mock_resp = AsyncMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"data": [{"id": "llama-3-8b"}]}
+    client.get.return_value = mock_resp
+    
+    with patch("orchestrator.monitor.set_node_status") as mock_set_status, \
+         patch("orchestrator.monitor.set_node_model") as mock_set_model:
         
-        # Make probe_node return mock data
-        async def fake_probe(node_id):
-            return {"node_id": node_id, "status": "online", "latency_ms": 10.0, "models": ["llama"]}
-        mock_probe.side_effect = fake_probe
+        await _probe(client, "NODE-1", "http://n1")
         
-        await _health_check_cycle()
+        # Verify httpx client was called
+        client.get.assert_awaited_once_with("http://n1/v1/models", timeout=5.0)
         
-        # It should have probed all nodes in the registry
-        assert mock_probe.await_count == 2
-        mock_probe.assert_any_await("NODE-1")
-        mock_probe.assert_any_await("NODE-2")
+        # Verify state was updated
+        states = get_node_states()
+        assert "NODE-1" in states
+        assert states["NODE-1"].status.value == "online"
+        assert "llama-3-8b" in states["NODE-1"].models_loaded
         
-        # It should have updated the state for both nodes
-        assert mock_set_state.call_count == 2
+        # Verify registry was updated
+        mock_set_status.assert_called_with("NODE-1", "online")
+        mock_set_model.assert_called_with("NODE-1", "llama-3-8b")
