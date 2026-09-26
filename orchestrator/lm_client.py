@@ -67,6 +67,7 @@ def _build_messages(
     query: str,
     system_prompt: Optional[str] = None,
     context: Optional[List[Dict[str, Any]]] = None,
+    attachments: Optional[List[Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Construct the messages list for the chat/completions payload."""
     messages: List[Dict[str, Any]] = []
@@ -77,7 +78,28 @@ def _build_messages(
     if context:
         messages.extend(context)
 
-    messages.append({"role": "user", "content": query})
+    # Check for image attachments
+    image_attachments = [
+        att for att in (attachments or [])
+        if getattr(att, "content_type", "").startswith("image/")
+    ]
+
+    if image_attachments:
+        # Construct multimodal content array (OpenAI / LM Studio format)
+        parts: List[Dict[str, Any]] = [{"type": "text", "text": query}]
+        for att in image_attachments:
+            b64_data = getattr(att, "data_base64", "")
+            mime = getattr(att, "content_type", "image/png")
+            parts.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime};base64,{b64_data}"
+                }
+            })
+        messages.append({"role": "user", "content": parts})
+    else:
+        messages.append({"role": "user", "content": query})
+
     return messages
 
 
@@ -87,12 +109,13 @@ def _build_payload(
     system_prompt: Optional[str] = None,
     context: Optional[List[Dict[str, Any]]] = None,
     parameters: Optional[Dict[str, Any]] = None,
+    attachments: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
     """Build the full chat/completions request body."""
     params = parameters or {}
     payload: Dict[str, Any] = {
-        "messages": _build_messages(query, system_prompt, context),
-        "max_tokens":   params.get("max_tokens",   512),
+        "messages": _build_messages(query, system_prompt, context, attachments),
+        "max_tokens":   params.get("max_tokens",   2048),
         "temperature":  params.get("temperature",  0.7),
         "top_p":        params.get("top_p",        0.95),
         "stream":       False,
@@ -114,6 +137,7 @@ async def call_node(
     endpoint: str,
     model: str,
     query: str,
+    attachments: Optional[List[Any]] = None,
     system_prompt: Optional[str] = None,
     context: Optional[List[Dict[str, Any]]] = None,
     parameters: Optional[Dict[str, Any]] = None,
@@ -130,6 +154,7 @@ async def call_node(
     endpoint:      Base URL of the LM Studio server, e.g. "http://192.168.1.101:1234"
     model:         Model identifier to pass in the payload.
     query:         The user's query text.
+    attachments:   Optional list of Attachment objects (images, documents, etc.).
     system_prompt: Optional system-level instruction injected before the user message.
     context:       Optional prior conversation turns (list of {role, content} dicts).
     parameters:    Optional model overrides (temperature, max_tokens, top_p…).
@@ -150,7 +175,7 @@ async def call_node(
         )
 
     chat_url = f"{endpoint.rstrip('/')}/v1/chat/completions"
-    payload = _build_payload(model, query, system_prompt, context, parameters)
+    payload = _build_payload(model, query, system_prompt, context, parameters, attachments)
 
     prefix = f"[{request_id}] " if request_id else ""
     attempt_str = f" (Attempt {attempt})" if attempt else ""
@@ -184,7 +209,28 @@ async def call_node(
                 latency_ms=latency_ms,
             )
 
-        content = choices[0].get("message", {}).get("content", "").strip()
+        choice = choices[0]
+        message = choice.get("message", {})
+        content = message.get("content", "")
+        if not content and "text" in choice:
+            content = choice.get("text", "")
+
+        content = content.strip() if isinstance(content, str) else ""
+
+        # Validate against empty response
+        if not content:
+            reasoning = message.get("reasoning_content", "")
+            finish_reason = choice.get("finish_reason", "unknown")
+            logger.warning(
+                "%sLM response content is empty! finish_reason=%s, reasoning_len=%d",
+                prefix, finish_reason, len(reasoning) if reasoning else 0,
+            )
+            raise LMClientError(
+                error_type="empty_response",
+                detail=f"Model returned empty content (finish_reason: {finish_reason}).",
+                latency_ms=latency_ms,
+            )
+
         usage = data.get("usage", {})
         actual_model = data.get("model", model)
 

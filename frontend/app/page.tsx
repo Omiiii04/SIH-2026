@@ -120,11 +120,14 @@ export default function DashboardPage() {
         query: effectiveQuery,
         input_type: effectiveInputType,
         session_id: currentSessionId,
+        file: imageFile,
       });
 
       const qr = data as QueryResponse;
       const assistantMsgId = crypto.randomUUID();
-      const content = ok ? qr.response : "I encountered an error processing your request.";
+      const content = ok
+        ? qr.response
+        : ((data as NodeFailureResponse)?.detail || "I encountered an error processing your request.");
 
       setMessages(prev => [...prev, {
         id: assistantMsgId,

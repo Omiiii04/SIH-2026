@@ -229,9 +229,11 @@ def reset_registry() -> None:
             priority=c.priority,
         )
 
-    _REGISTRY = new
-    _TYPE_TO_NODE_ID = {e.node_type: e.node_id for e in new.values()}
-    _CAPABILITY_TO_NODE_IDS = {}
+    _REGISTRY.clear()
+    _REGISTRY.update(new)
+    _TYPE_TO_NODE_ID.clear()
+    _TYPE_TO_NODE_ID.update({e.node_type: e.node_id for e in new.values()})
+    _CAPABILITY_TO_NODE_IDS.clear()
     for e in new.values():
         _CAPABILITY_TO_NODE_IDS.setdefault(e.capability, []).append(e.node_id)
     logger.debug("Registry reset: %d node(s) from .env.", len(new))

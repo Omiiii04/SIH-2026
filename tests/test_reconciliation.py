@@ -22,13 +22,13 @@ async def test_reconcile_creates_new_nodes(mock_env_nodes):
     from orchestrator.node_registry import _REGISTRY
     
     with patch("orchestrator.env_nodes.parse_node_configs", return_value=mock_env_nodes), \
-         patch("database.postgres.get_session") as mock_sess_ctx, \
+         patch("orchestrator.node_manager.get_session") as mock_sess_ctx, \
          patch("orchestrator.node_manager.sync_registry_from_db", new_callable=AsyncMock):
         
         mock_session = AsyncMock()
-        mock_execute = AsyncMock()
+        mock_execute = MagicMock()
         mock_execute.unique.return_value.scalars.return_value.all.return_value = []
-        mock_session.execute.return_value = mock_execute
+        mock_session.execute = AsyncMock(return_value=mock_execute)
         mock_sess_ctx.return_value.__aenter__.return_value = mock_session
         
         await reconcile_nodes_from_env()
@@ -51,13 +51,13 @@ async def test_reconcile_updates_existing_nodes(mock_env_nodes):
     n2_existing = WorkerNode(node_id="NODE-2", endpoint="http://10.0.0.2:1234", enabled=True)
     
     with patch("orchestrator.env_nodes.parse_node_configs", return_value=mock_env_nodes), \
-         patch("database.postgres.get_session") as mock_sess_ctx, \
+         patch("orchestrator.node_manager.get_session") as mock_sess_ctx, \
          patch("orchestrator.node_manager.sync_registry_from_db", new_callable=AsyncMock):
         
         mock_session = AsyncMock()
-        mock_execute = AsyncMock()
+        mock_execute = MagicMock()
         mock_execute.unique.return_value.scalars.return_value.all.return_value = [n1_existing, n2_existing]
-        mock_session.execute.return_value = mock_execute
+        mock_session.execute = AsyncMock(return_value=mock_execute)
         mock_sess_ctx.return_value.__aenter__.return_value = mock_session
         
         await reconcile_nodes_from_env()
@@ -78,12 +78,12 @@ async def test_sync_registry_from_db():
     n3 = WorkerNode(node_id="NODE-3", endpoint="http://n3", enabled=True, name="N3")
     n4 = WorkerNode(node_id="NODE-4", endpoint="http://n4", enabled=False, name="N4")
     
-    with patch("database.postgres.get_session") as mock_sess_ctx:
+    with patch("orchestrator.node_manager.get_session") as mock_sess_ctx:
         mock_session = AsyncMock()
-        mock_execute = AsyncMock()
+        mock_execute = MagicMock()
         # Query in sync_registry_from_db filters for enabled=True, but let's assume the mock just returns n3
         mock_execute.unique.return_value.scalars.return_value.all.return_value = [n3]
-        mock_session.execute.return_value = mock_execute
+        mock_session.execute = AsyncMock(return_value=mock_execute)
         mock_sess_ctx.return_value.__aenter__.return_value = mock_session
         
         await sync_registry_from_db()

@@ -157,8 +157,8 @@ async def test_router_exhausts_retries():
         async with _make_client() as client:
             resp = await client.post("/api/v1/query", json={"user_id": "u1", "query": "hello", "input_type": "text"})
             
-        # Router still returns 200 with an error object
-        assert resp.status_code == 200
+        # Router returns 503 with an error object when retries are exhausted
+        assert resp.status_code == 503
         data = resp.json()
         assert "error_type" in data
         assert data["error_type"] == "connection_error"

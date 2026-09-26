@@ -23,13 +23,14 @@ WINDOW_SIZE           = 1000
 
 @dataclass
 class NodeState:
-    node_id:       str
-    status:        NodeStatus = NodeStatus.OFFLINE
-    latency_ms:    Optional[float] = None
-    models_loaded: list[str]       = field(default_factory=list)
-    capacity:      Optional[str]   = None
-    last_checked:  Optional[datetime] = None
-    last_success:  Optional[datetime] = None
+    node_id:         str
+    status:          NodeStatus = NodeStatus.OFFLINE
+    latency_ms:      Optional[float] = None
+    models_loaded:   list[str]       = field(default_factory=list)
+    models_metadata: dict[str, dict] = field(default_factory=dict)
+    capacity:        Optional[str]   = None
+    last_checked:    Optional[datetime] = None
+    last_success:    Optional[datetime] = None
 
 _NODE_STATES: Dict[str, NodeState] = {}
 
@@ -62,40 +63,44 @@ async def _probe(client: httpx.AsyncClient, node_id: str, base_url: str) -> None
         set_node_status(node_id, "offline")
         return
 
-    probe_url = f"{base_url.rstrip('/')}/v1/models"
+    from orchestrator.node_manager import discover_models
     t0 = time.monotonic()
     now = datetime.now(timezone.utc)
     try:
-        resp = await client.get(probe_url, timeout=PROBE_TIMEOUT)
+        models_data = await discover_models(base_url, client=client)
         latency_ms = (time.monotonic() - t0) * 1000
         models_loaded: list[str] = []
+        models_metadata: dict[str, dict] = {}
         capacity: Optional[str] = None
-        if resp.status_code == 200:
-            data = resp.json()
-            models = data.get("data", [])
-            if models:
-                models_loaded = [m.get("id") for m in models if m.get("id")]
-                model_loaded = models_loaded[0] if models_loaded else None
-                # Attempt to extract capacity e.g. "8b", "7.5B"
-                if model_loaded:
+
+        if models_data:
+            models_metadata = {m.get("id"): m for m in models_data if m.get("id")}
+            loaded = [m.get("id") for m in models_data if m.get("is_loaded")]
+            all_models = [m.get("id") for m in models_data if m.get("id")]
+            models_loaded = loaded if loaded else all_models
+            model_loaded = loaded[0] if loaded else (all_models[0] if all_models else None)
+            if model_loaded:
+                params_str = models_metadata.get(model_loaded, {}).get("params_string")
+                if params_str:
+                    capacity = f"{params_str} Params"
+                else:
                     match = re.search(r'([\d\.]+[bB])', model_loaded)
                     if match:
                         capacity = match.group(1).upper() + " Params"
+                set_node_model(node_id, model_loaded)
+
             status = NodeStatus.DEGRADED if latency_ms > DEGRADED_THRESHOLD_MS else NodeStatus.ONLINE
             registry_status = "online"
             last_success = now
-            # Sync the live model name into the registry so the router always
-            # uses the exact model ID that LM Studio reports.
-            if model_loaded:
-                set_node_model(node_id, model_loaded)
         else:
             status = NodeStatus.OFFLINE
             registry_status = "offline"
             last_success = _NODE_STATES.get(node_id, NodeState(node_id=node_id)).last_success
+
         state = _NODE_STATES.get(node_id, NodeState(node_id=node_id))
         _NODE_STATES[node_id] = NodeState(
             node_id=node_id, status=status, latency_ms=round(latency_ms, 1),
-            models_loaded=models_loaded, capacity=capacity, last_checked=now,
+            models_loaded=models_loaded, models_metadata=models_metadata, capacity=capacity, last_checked=now,
             last_success=last_success if status != NodeStatus.OFFLINE else state.last_success,
         )
         set_node_status(node_id, registry_status)
@@ -105,7 +110,7 @@ async def _probe(client: httpx.AsyncClient, node_id: str, base_url: str) -> None
         old = _NODE_STATES.get(node_id, NodeState(node_id=node_id))
         _NODE_STATES[node_id] = NodeState(
             node_id=node_id, status=NodeStatus.OFFLINE, latency_ms=round(latency_ms, 1),
-            models_loaded=[], capacity=None, last_checked=now, last_success=old.last_success,
+            models_loaded=[], models_metadata={}, capacity=None, last_checked=now, last_success=old.last_success,
         )
         set_node_status(node_id, "offline")
 

@@ -126,33 +126,25 @@ async def handle_query(
 
     # Step 1: classify
     t_class_start = time.monotonic()
-    cls: ClassificationResult = await classify(request.query, request.input_type, request_id=request_id)
+    cls: ClassificationResult = await classify(
+        request.query,
+        request.input_type,
+        request_id=request_id,
+        attachments=request.attachments,
+    )
     classification_ms = (time.monotonic() - t_class_start) * 1000
 
     logger.info(
-        "[%s] Classified -> task=%s  capability=%s  difficulty=%s  confidence=%.2f  method=%s",
+        "[%s] Classified -> task=%s  capability=%s  difficulty=%s  confidence=%.2f  method=%s  modalities=%s",
         request_id, cls.task_type, cls.required_capability,
         cls.difficulty, cls.confidence, cls.classifier_method,
+        cls.input_modalities,
     )
 
-    ideal_node = get_node_by_type(cls.node_type)
-    if ideal_node:
-        preferred_node_id = ideal_node.node_id
-    else:
-        # Fallback to the new IDs if registry somehow didn't return ideal_node
-        fallback_map = {
-            NodeType.TEXT: "NODE-1",
-            NodeType.VISION: "NODE-2",
-            NodeType.REASONING: "NODE-3",
-            NodeType.CODE: "NODE-4",
-            NodeType.RAG: "NODE-5",
-        }
-        preferred_node_id = fallback_map.get(cls.node_type, "NODE-1")
-
-    # Step 2: retry loop
+    # Step 2: retry loop over dynamic scheduler candidates
     tried_nodes: set[str] = set()
     last_exc: LMClientError | None = None
-    last_node_id: str = preferred_node_id
+    last_node_id: str = "NONE"
     routing: RoutingDecision | None = None
 
     from orchestrator.scheduler import select_best_candidates
@@ -160,44 +152,44 @@ async def handle_query(
     for attempt in range(MAX_RETRIES):
         candidates = select_best_candidates(cls, skip_ids=tried_nodes)
 
-        # No more fresh nodes (all tried or all offline)
+        # No more fresh candidates (all tried, offline, or incompatible)
         if not candidates:
             logger.warning(
-                "[%s] No fresh online candidates for capability=%s (attempt %d)",
-                request_id, cls.required_capability, attempt + 1,
+                "[%s] No fresh online candidates for capability=%s, modalities=%s (attempt %d)",
+                request_id, cls.required_capability, cls.input_modalities, attempt + 1,
             )
             break
 
         node, model_name, score, scheduler_reason = candidates[0]
         tried_nodes.add(node.node_id)
         last_node_id = node.node_id
-        
-        routing = _build_routing_decision(cls, node.node_id, preferred_node_id)
-        routing.reason += f" | Scheduler: {scheduler_reason}"
+
+        was_fallback = attempt > 0
+        routing_reason = f"Selected by scheduler: {scheduler_reason}"
+        if was_fallback:
+            routing_reason += f" (Fallback attempt {attempt + 1})"
+
+        routing = RoutingDecision(
+            selected_node=node.node_id,
+            reason=routing_reason,
+            was_fallback=was_fallback,
+        )
 
         logger.info(
-            "[%s] Attempt %d/%d  node=%s  fallback=%s  score=%.1f",
-            request_id, attempt + 1, MAX_RETRIES, node.node_id, routing.was_fallback, score,
+            "[%s] Attempt %d/%d  node=%s  model=%s  fallback=%s  score=%.1f",
+            request_id, attempt + 1, MAX_RETRIES, node.node_id, model_name, routing.was_fallback, score,
         )
 
         t_call_start = time.monotonic()
-        # node.model is populated by the health monitor from GET /v1/models.
-        # If it's still empty (node came online between probes), pass "" —
-        # LM Studio will use whichever model it currently has loaded.
-        # Use a shorter per-node timeout for vision capability:
-        # NODE-2 runs a text model that hangs forever on image payloads.
-        # 15s is enough for a real vision model; text fallback gets the full timeout.
-        node_timeout = 15.0 if (
-            cls.required_capability == "vision" and node.node_type == NodeType.VISION
-        ) else timeout
 
         try:
             lm_resp: LMResponse = await call_node(
                 endpoint=node.endpoint,
-                model=model_name,   # live model id selected by scheduler
+                model=model_name,
                 query=request.query,
+                attachments=request.attachments,
                 parameters=request.parameters,
-                timeout=node_timeout,
+                timeout=timeout,
                 request_id=request_id,
                 attempt=attempt + 1,
                 node_id=node.node_id,
@@ -258,22 +250,28 @@ async def handle_query(
 
         return response
 
-    # All retries exhausted
+    # All retries exhausted / no compatible candidate
     total_ms = (time.monotonic() - t_start) * 1000
     exc_lat = last_exc.latency_ms if last_exc else 0.0
     routing_ms = total_ms - exc_lat - classification_ms
+
+    is_multimodal = "image" in cls.input_modalities
+    if last_exc:
+        exc_type = last_exc.error_type
+        exc_detail = last_exc.detail
+    elif is_multimodal:
+        exc_type = "no_compatible_multimodal_model"
+        exc_detail = "No online node available with vision capability for image request."
+    else:
+        exc_type = "no_available_node"
+        exc_detail = f"No online node available for capability '{cls.required_capability}'."
+
     if routing is None:
         routing = RoutingDecision(
-            selected_node=preferred_node_id,
-            reason=f"No online node available for capability '{cls.required_capability}'.",
+            selected_node=last_node_id,
+            reason=exc_detail,
             was_fallback=False,
         )
-
-    exc_type   = last_exc.error_type if last_exc else "no_available_node"
-    exc_detail = last_exc.detail     if last_exc else (
-        f"No online node available for capability '{cls.required_capability}'."
-    )
-    exc_lat    = last_exc.latency_ms if last_exc else 0.0
 
     failure_response = NodeFailureResponse(
         request_id=request_id,

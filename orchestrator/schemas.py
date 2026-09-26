@@ -156,7 +156,13 @@ class ErrorResponse(BaseModel):
     code: Optional[str] = None
 
 
-# ── Phase 2: /api/v1/query ─────────────────────────────────────────────────────
+class Attachment(BaseModel):
+    """File attachment (image, document, etc.) in a multimodal request."""
+    filename: str
+    content_type: str
+    data_base64: str = Field(description="Base64 encoded file data")
+    size_bytes: int = 0
+
 
 class QueryRequest(BaseModel):
     """Request body for POST /api/v1/query."""
@@ -174,6 +180,10 @@ class QueryRequest(BaseModel):
     parameters: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Model-specific overrides (temperature, max_tokens, etc.).",
+    )
+    attachments: List[Attachment] = Field(
+        default_factory=list,
+        description="Optional list of file attachments.",
     )
 
 

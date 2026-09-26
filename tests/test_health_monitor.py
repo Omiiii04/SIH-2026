@@ -23,10 +23,12 @@ async def test_probe_updates_state(mock_registry):
     # We want to mock the httpx client get call
     client = AsyncMock(spec=httpx.AsyncClient)
     
-    # Create a mock response
-    mock_resp = AsyncMock()
+    # Create a mock response with native LM Studio models metadata
+    mock_resp = MagicMock()
     mock_resp.status_code = 200
-    mock_resp.json.return_value = {"data": [{"id": "llama-3-8b"}]}
+    mock_resp.json.return_value = {
+        "models": [{"id": "llama-3-8b", "loaded_instances": [{"id": "llama-3-8b"}]}]
+    }
     client.get.return_value = mock_resp
     
     with patch("orchestrator.monitor.set_node_status") as mock_set_status, \
@@ -34,13 +36,13 @@ async def test_probe_updates_state(mock_registry):
         
         await _probe(client, "NODE-1", "http://n1")
         
-        # Verify httpx client was called
-        client.get.assert_awaited_once_with("http://n1/v1/models", timeout=5.0)
+        # Verify httpx client was called for native models endpoint
+        client.get.assert_awaited_once_with("http://n1/api/v1/models", timeout=5.0)
         
         # Verify state was updated
         states = get_node_states()
         assert "NODE-1" in states
-        assert states["NODE-1"].status.value == "online"
+        assert states["NODE-1"].status.value.lower() == "online"
         assert "llama-3-8b" in states["NODE-1"].models_loaded
         
         # Verify registry was updated

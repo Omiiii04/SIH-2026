@@ -166,16 +166,89 @@ async def sync_registry_from_db() -> None:
 # Model discovery
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def discover_models(endpoint: str) -> list[dict]:
-    """Query GET /v1/models to list models available on a node."""
-    url = f"{_normalize_endpoint(endpoint)}/v1/models"
+async def discover_models(
+    endpoint: str,
+    client: Optional[httpx.AsyncClient] = None,
+) -> list[dict]:
+    """
+    Discover models and their capabilities on a node.
+    Primary: GET /api/v1/models (LM Studio native API, provides explicit capabilities).
+    Fallback: GET /v1/models (OpenAI compatibility endpoint).
+    """
+    norm = _normalize_endpoint(endpoint)
+    close_client = False
+    if client is None:
+        client = httpx.AsyncClient()
+        close_client = True
+
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, timeout=5.0)
+        # 1. Primary: LM Studio native model endpoint
+        try:
+            resp = await client.get(f"{norm}/api/v1/models", timeout=5.0)
             if resp.status_code == 200:
-                return resp.json().get("data", [])
-    except Exception as exc:
-        logger.warning("discover_models failed for %s: %s", url, exc)
+                body = resp.json()
+                models_list = body.get("models")
+                if isinstance(models_list, list) and models_list:
+                    discovered = []
+                    for m in models_list:
+                        loaded_instances = m.get("loaded_instances", [])
+                        model_id = None
+                        if loaded_instances and isinstance(loaded_instances, list):
+                            inst = loaded_instances[0]
+                            if isinstance(inst, dict):
+                                model_id = inst.get("id")
+                        if not model_id:
+                            model_id = m.get("key") or m.get("id") or "unknown"
+
+                        quant = m.get("quantization")
+                        quant_name = quant.get("name") if isinstance(quant, dict) else str(quant or "")
+                        caps = m.get("capabilities", {})
+                        if not isinstance(caps, dict):
+                            caps = {}
+
+                        discovered.append({
+                            "id": model_id,
+                            "type": m.get("type", "llm"),
+                            "publisher": m.get("publisher", ""),
+                            "display_name": m.get("display_name", ""),
+                            "architecture": m.get("architecture", ""),
+                            "quantization": quant_name,
+                            "params_string": m.get("params_string", ""),
+                            "context_length": m.get("max_context_length"),
+                            "is_loaded": bool(loaded_instances),
+                            "capabilities": caps,
+                            "capability_source": "lmstudio_metadata",
+                        })
+                    if discovered:
+                        logger.debug("Discovered %d model(s) via native /api/v1/models from %s", len(discovered), norm)
+                        return discovered
+        except Exception as exc:
+            logger.debug("Native /api/v1/models failed for %s: %s", norm, exc)
+
+        # 2. Fallback: OpenAI-compatible endpoint
+        try:
+            resp = await client.get(f"{norm}/v1/models", timeout=5.0)
+            if resp.status_code == 200:
+                body = resp.json()
+                models_data = body.get("data", [])
+                discovered = []
+                for m in models_data:
+                    discovered.append({
+                        "id": m.get("id", "unknown"),
+                        "type": "llm",
+                        "is_loaded": True,
+                        "capabilities": {},
+                        "capability_source": "inferred",
+                    })
+                logger.debug("Discovered %d model(s) via /v1/models fallback from %s", len(discovered), norm)
+                return discovered
+        except Exception as exc:
+            logger.warning("discover_models failed for %s: %s", norm, exc)
+
+    finally:
+        if close_client:
+            await client.aclose()
+
     return []
 
 
@@ -193,8 +266,12 @@ async def probe_node(node_id: str) -> dict:
 
     Returns
     -------
-    dict with keys: node_id, status, latency_ms, models
+    dict with keys: node_id, status, latency_ms, models, models_detailed
     """
+    import json
+    import time
+    from orchestrator.node_registry import set_node_model
+
     async with get_session() as session:
         result = await session.execute(
             select(WorkerNode).where(WorkerNode.node_id == node_id)
@@ -203,21 +280,16 @@ async def probe_node(node_id: str) -> dict:
         if not node:
             raise ValueError(f"Node {node_id!r} not found in DB")
 
-        models_data = await discover_models(node.endpoint)
         latency_ms = 0.0
         now = datetime.now(timezone.utc)
+        models_data: list[dict] = []
 
-        # Measure reachability and latency
         try:
             async with httpx.AsyncClient() as client:
-                t0 = httpx.get   # not called — we use the client below
-                import time
                 start = time.monotonic()
-                resp = await client.get(
-                    f"{node.endpoint}/v1/models", timeout=httpx.Timeout(5.0)
-                )
+                models_data = await discover_models(node.endpoint, client=client)
                 latency_ms = (time.monotonic() - start) * 1000
-                is_online = resp.status_code == 200
+                is_online = len(models_data) > 0
         except Exception:
             is_online = False
 
@@ -230,15 +302,20 @@ async def probe_node(node_id: str) -> dict:
         if is_online and models_data:
             await session.execute(
                 WorkerModel.__table__.delete().where(
-                    WorkerModel.node_id == node_id   # Python attr → DB col worker_node_id
+                    WorkerModel.node_id == node_id
                 )
             )
             for m in models_data:
                 model_id = m.get("id", "unknown")
                 session.add(WorkerModel(
-                    node_id=node_id,     # FK via node_id attr → worker_node_id column
+                    node_id=node_id,
                     model_id=model_id,
-                    is_loaded=True,
+                    model_type=m.get("type"),
+                    architecture=m.get("architecture"),
+                    quantization=m.get("quantization"),
+                    context_length=m.get("context_length"),
+                    is_loaded=m.get("is_loaded", True),
+                    capabilities_str=json.dumps(m.get("capabilities", {})),
                     discovered_at=now,
                 ))
 
@@ -246,9 +323,18 @@ async def probe_node(node_id: str) -> dict:
 
     await sync_registry_from_db()
 
+    # Update active model in registry
+    active_model = ""
+    if models_data:
+        loaded = [m.get("id") for m in models_data if m.get("is_loaded")]
+        active_model = loaded[0] if loaded else models_data[0].get("id", "")
+        if active_model:
+            set_node_model(node_id, active_model)
+
     return {
         "node_id": node_id,
         "status": "online" if is_online else "offline",
         "latency_ms": round(latency_ms, 1),
         "models": [m.get("id") for m in models_data],
+        "models_detailed": models_data,
     }

@@ -22,7 +22,7 @@ from typing import List, Union, Optional
 import uuid
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request as FastAPIRequest
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -260,7 +260,8 @@ async def get_node_statuses() -> dict:
             priority=1,
         )
         for m in models:
-            caps.update(discover_capabilities(registry_entry, m))
+            m_meta = state.models_metadata.get(m) if (state and state.models_metadata) else None
+            caps.update(discover_capabilities(registry_entry, m, model_meta=m_meta))
 
         formatted_nodes.append({
             "node_id": nid,
@@ -448,7 +449,8 @@ async def get_node(node_id: str) -> dict:
     from orchestrator.node_registry import _REGISTRY, NodeRegistryEntry
     registry_entry = _REGISTRY.get(node_id) or NodeRegistryEntry(node_id=node_id, endpoint=node.endpoint, status=node.status, node_name=node.name, capability="", node_type="", model="", supported_input_types=[])
     for m in models:
-        caps.update(discover_capabilities(registry_entry, m))
+        m_meta = state.models_metadata.get(m) if (state and state.models_metadata) else None
+        caps.update(discover_capabilities(registry_entry, m, model_meta=m_meta))
         
     return {
         "node_id": node.id,
@@ -491,18 +493,73 @@ async def patch_node_status(node_id: str, status: str) -> dict:
         503: {"model": NodeFailureResponse, "description": "Node unavailable or returned an error"},
     },
 )
-async def query(request: QueryRequest) -> JSONResponse:
+async def query(raw_request: FastAPIRequest) -> JSONResponse:
     """
-    Main inference endpoint.
+    Main inference endpoint. Supports both application/json and multipart/form-data.
 
     Pipeline:
-      1. Classify the query (hybrid: rules -> LLM fallback)
-      2. Select the best available online node for the required capability
-      3. Call the LM Studio node via httpx (with retry up to http_max_retries)
-      4. Persist result to PostgreSQL + ChromaDB (fire-and-forget)
-      5. Return QueryResponse on success, NodeFailureResponse on node failure
+      1. Normalize request & parse attachments
+      2. Classify the query & detect modalities
+      3. Select the best available online node for the required capability
+      4. Call the LM Studio node via httpx (with retry up to http_max_retries)
+      5. Persist result to PostgreSQL + ChromaDB (fire-and-forget)
+      6. Return QueryResponse on success, NodeFailureResponse on node failure
     """
-    result = await handle_query(request, timeout=cfg.http_timeout)
+    import base64
+    from orchestrator.schemas import Attachment, InputType
+
+    content_type = raw_request.headers.get("content-type", "")
+    attachments: List[Attachment] = []
+
+    if content_type.startswith("multipart/form-data"):
+        form = await raw_request.form()
+        user_id = str(form.get("user_id", "dashboard-user"))
+        query_text = str(form.get("query", ""))
+        session_id = form.get("session_id")
+        session_id = str(session_id) if session_id else None
+        input_type_val = form.get("input_type", "text")
+
+        form_files = (
+            form.getlist("attachments")
+            or form.getlist("attachments[]")
+            or form.getlist("files")
+            or form.getlist("files[]")
+            or form.getlist("file")
+        )
+        for f in form_files:
+            if hasattr(f, "read"):
+                file_bytes = await f.read()
+                ct = getattr(f, "content_type", None) or "application/octet-stream"
+                b64 = base64.b64encode(file_bytes).decode("ascii")
+                attachments.append(Attachment(
+                    filename=getattr(f, "filename", "attachment") or "attachment",
+                    content_type=ct,
+                    data_base64=b64,
+                    size_bytes=len(file_bytes),
+                ))
+
+        has_image = any(a.content_type.startswith("image/") for a in attachments)
+        input_type = InputType.IMAGE if has_image else (
+            InputType(input_type_val) if input_type_val in InputType._value2member_map_ else InputType.TEXT
+        )
+
+        req_obj = QueryRequest(
+            user_id=user_id,
+            query=query_text,
+            input_type=input_type,
+            session_id=session_id,
+            attachments=attachments,
+        )
+    else:
+        try:
+            body = await raw_request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}")
+        req_obj = QueryRequest(**body)
+        if req_obj.attachments and any(a.content_type.startswith("image/") for a in req_obj.attachments):
+            req_obj.input_type = InputType.IMAGE
+
+    result = await handle_query(req_obj, timeout=cfg.http_timeout)
 
     if isinstance(result, NodeFailureResponse):
         return JSONResponse(

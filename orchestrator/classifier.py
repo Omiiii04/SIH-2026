@@ -210,9 +210,17 @@ _RULE_CONFIDENCE_THRESHOLD = 0.90
 def _classify_by_rules(
     query: str,
     input_type: InputType,
+    attachments: Optional[List[Any]] = None,
 ) -> ClassificationResult:
     query_lower = query.lower()
-    
+
+    has_image_attachment = any(
+        getattr(a, "content_type", "").startswith("image/")
+        for a in (attachments or [])
+    )
+    if has_image_attachment:
+        input_type = InputType.IMAGE
+
     input_modalities = {"text"}
     if input_type == InputType.IMAGE or "image" in query_lower or "picture" in query_lower or "photo" in query_lower:
         input_modalities.add("image")
@@ -441,7 +449,12 @@ async def _classify_via_llm(
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def classify(query: str, input_type: InputType, request_id: Optional[str] = None) -> ClassificationResult:
+async def classify(
+    query: str,
+    input_type: InputType,
+    request_id: Optional[str] = None,
+    attachments: Optional[List[Any]] = None,
+) -> ClassificationResult:
     """
     Hybrid classifier entry point (async).
 
@@ -452,10 +465,12 @@ async def classify(query: str, input_type: InputType, request_id: Optional[str] 
 
     Parameters
     ----------
-    query:      Raw user query string.
-    input_type: InputType hint from the QueryRequest.
+    query:       Raw user query string.
+    input_type:  InputType hint from the QueryRequest.
+    request_id:  Optional request tracking ID.
+    attachments: Optional list of attachments for modality detection.
     """
-    stage1 = _classify_by_rules(query, input_type)
+    stage1 = _classify_by_rules(query, input_type, attachments=attachments)
     logger.debug(
         "Stage1: node=%s task=%s confidence=%.2f method=%s",
         stage1.node_type, stage1.task_type, stage1.confidence, stage1.classifier_method,
