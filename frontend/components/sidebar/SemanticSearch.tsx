@@ -5,8 +5,7 @@ import { searchMemory } from "@/lib/api";
 import type { MemorySearchResult } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Search, Loader2, DatabaseZap, Clock, Server, X } from "lucide-react";
+import { Search, Loader2, X, Server } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 export function SemanticSearch({ onClose }: { onClose: () => void }) {
@@ -23,8 +22,8 @@ export function SemanticSearch({ onClose }: { onClose: () => void }) {
     try {
       const res = await searchMemory("dashboard-user", query.trim(), 8);
       setResults(res.results);
-    } catch (err) {
-      setError("ChromaDB unavailable or no memories stored yet.");
+    } catch {
+      setError("Memory search unavailable or no memories stored yet.");
       setResults(null);
     } finally {
       setLoading(false);
@@ -32,62 +31,82 @@ export function SemanticSearch({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="absolute inset-0 z-50 bg-card/95 backdrop-blur-sm border-r border-border flex flex-col">
-      <div className="flex items-center justify-between p-4 border-b border-border">
-        <div className="flex items-center gap-2 text-primary">
-          <DatabaseZap size={16} />
-          <h2 className="text-sm font-semibold">Semantic Search</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
+      <div 
+        className="fixed inset-0" 
+        onClick={onClose} 
+      />
+      <div className="relative w-full max-w-lg bg-card border border-border rounded-xl shadow-xl flex flex-col max-h-[80vh] overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-150">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Search size={16} className="text-muted-foreground" />
+            <h2 className="text-sm font-semibold">Search Memory</h2>
+          </div>
+          <button 
+            onClick={onClose} 
+            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+          >
+            <X size={16} />
+          </button>
         </div>
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-          <X size={16} />
-        </button>
-      </div>
 
-      <div className="p-4 flex flex-col gap-4 flex-1 overflow-hidden">
-        <form onSubmit={handleSearch} className="flex gap-2">
-          <Input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search past interactions…"
-            className="text-sm bg-background"
-          />
-          <Button type="submit" disabled={!query.trim() || loading} size="icon" className="shrink-0">
-            {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-          </Button>
-        </form>
+        <div className="p-4 flex flex-col gap-3 flex-1 overflow-hidden">
+          <form onSubmit={handleSearch} className="flex gap-2">
+            <Input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search past conversations…"
+              className="text-sm bg-background border-border"
+            />
+            <Button 
+              type="submit" 
+              disabled={!query.trim() || loading} 
+              size="sm" 
+              className="shrink-0 h-9 px-3"
+            >
+              {loading ? <Loader2 size={14} className="animate-spin" /> : "Search"}
+            </Button>
+          </form>
 
-        {error && (
-          <p className="text-xs text-red-400 bg-red-500/10 rounded-md p-2 border border-red-500/20">
-            {error}
-          </p>
-        )}
+          {error && (
+            <p className="text-xs text-muted-foreground bg-muted/60 rounded-md p-2.5 border border-border">
+              {error}
+            </p>
+          )}
 
-        {results !== null && (
-          <ScrollArea className="flex-1">
-            {results.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No matching memories found.</p>
-            ) : (
-              <div className="flex flex-col gap-2 pb-4">
-                {results.map((r) => (
-                  <div key={r.request_id} className="border border-border/60 rounded-md p-3 flex flex-col gap-1.5 bg-background/50 text-left">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30 px-1 py-0 h-4">
-                        {(r.score * 100).toFixed(1)}% match
-                      </Badge>
-                      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                        <Server size={9} />{r.node_id}
-                      </span>
+          {results !== null && (
+            <ScrollArea className="flex-1 pr-2">
+              {results.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-8">
+                  No matching memories found.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2 pb-2">
+                  {results.map((r) => (
+                    <div 
+                      key={r.request_id} 
+                      className="border border-border/70 rounded-lg p-3 flex flex-col gap-1.5 bg-background text-left"
+                    >
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          {(r.score * 100).toFixed(0)}% relevance
+                        </span>
+                        <span className="flex items-center gap-1 font-mono text-[10px]">
+                          <Server size={10} /> {r.node_id}
+                        </span>
+                      </div>
+                      <p className="text-xs font-medium text-foreground line-clamp-1">Q: {r.query}</p>
+                      <p className="text-xs text-muted-foreground line-clamp-3">A: {r.response}</p>
                     </div>
-                    <p className="text-xs font-medium text-foreground">Q: {r.query}</p>
-                    <p className="text-xs text-muted-foreground line-clamp-3">A: {r.response}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-        )}
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          )}
+        </div>
       </div>
     </div>
   );
 }
+

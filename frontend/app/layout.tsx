@@ -7,9 +7,8 @@ const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 
 export const metadata: Metadata = {
-  title: "Distributed AI Orchestrator | SIH-2026",
-  description:
-    "Real-time dashboard for the SIH-2026 distributed AI inference system — route queries across specialised AI worker nodes with live health monitoring.",
+  title: "AI Assistant | SIH-2026",
+  description: "A minimal, intelligent conversational assistant powered by a distributed inference mesh.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

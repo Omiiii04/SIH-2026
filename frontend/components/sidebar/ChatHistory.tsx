@@ -1,66 +1,91 @@
+"use client";
+
 import type { HistoryEntry } from "@/lib/types";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageSquare, Clock } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 
-function categorizeDate(timestamp: string) {
-  const d = new Date(timestamp);
-  const now = new Date();
-  const diffTime = Math.abs(now.getTime() - d.getTime());
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-  
-  if (diffDays <= 1 && now.getDate() === d.getDate()) return "Today";
-  if (diffDays <= 2 && now.getDate() !== d.getDate()) return "Yesterday";
-  return "Previous 7 Days";
+interface ChatHistoryProps {
+  entries: HistoryEntry[];
+  selectedId?: string;
+  onSelect?: (entry: HistoryEntry) => void;
 }
 
-export function ChatHistory({ entries }: { entries: HistoryEntry[] }) {
+function categorizeDate(timestamp: string): "Today" | "Yesterday" | "Previous 7 Days" | "Older" {
+  try {
+    const d = new Date(timestamp);
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const entryTime = d.getTime();
+    
+    if (entryTime >= startOfToday) return "Today";
+    if (entryTime >= startOfToday - 86400000) return "Yesterday";
+    if (entryTime >= startOfToday - 7 * 86400000) return "Previous 7 Days";
+    return "Older";
+  } catch {
+    return "Older";
+  }
+}
+
+export function ChatHistory({ entries, selectedId, onSelect }: ChatHistoryProps) {
   if (entries.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-32 text-muted-foreground opacity-60">
-        <MessageSquare size={20} className="mb-2" />
-        <p className="text-xs">No chat history</p>
+      <div className="flex flex-col items-center justify-center h-28 text-muted-foreground/60 text-center px-4">
+        <MessageSquare size={16} className="mb-1.5 opacity-40" />
+        <p className="text-xs">No chat history yet</p>
       </div>
     );
   }
 
-  const grouped = entries.reduce((acc, entry) => {
-    const cat = categorizeDate(entry.timestamp);
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(entry);
-    return acc;
-  }, {} as Record<string, HistoryEntry[]>);
+  const grouped: Record<string, HistoryEntry[]> = {
+    Today: [],
+    Yesterday: [],
+    "Previous 7 Days": [],
+    Older: [],
+  };
 
-  const order = ["Today", "Yesterday", "Previous 7 Days"];
+  for (const entry of entries) {
+    const cat = categorizeDate(entry.timestamp);
+    grouped[cat].push(entry);
+  }
+
+  const order: (keyof typeof grouped)[] = ["Today", "Yesterday", "Previous 7 Days", "Older"];
 
   return (
-    <div className="flex flex-col h-full">
-      <ScrollArea className="flex-1">
-        <div className="flex flex-col gap-4 pb-4 px-2 pt-2">
-          {order.map((cat) => {
-            const items = grouped[cat];
-            if (!items?.length) return null;
-            return (
-              <div key={cat} className="flex flex-col">
-                <div className="px-2 py-2 text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
-                  {cat}
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  {items.map((e) => (
+    <ScrollArea className="h-full">
+      <div className="flex flex-col gap-3 py-2 px-1">
+        {order.map((cat) => {
+          const items = grouped[cat];
+          if (!items || items.length === 0) return null;
+
+          return (
+            <div key={cat} className="flex flex-col">
+              <span className="px-2 py-1 text-[11px] font-medium text-muted-foreground/70">
+                {cat}
+              </span>
+              <div className="flex flex-col gap-0.5">
+                {items.map((entry) => {
+                  const isSelected = selectedId === entry.request_id;
+                  return (
                     <button
-                      key={e.request_id}
-                      className="flex flex-col items-start p-2 text-left rounded-md hover:bg-muted/50 transition-colors focus:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/20"
+                      key={entry.request_id}
+                      onClick={() => onSelect?.(entry)}
+                      title={entry.query}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs truncate transition-colors ${
+                        isSelected
+                          ? "bg-muted text-foreground font-medium"
+                          : "text-foreground/80 hover:bg-muted/60 hover:text-foreground"
+                      }`}
                     >
-                      <span className="text-[13px] truncate w-full font-medium text-foreground/90 leading-tight">
-                        {e.query}
-                      </span>
+                      {entry.query}
                     </button>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      </ScrollArea>
-    </div>
+            </div>
+          );
+        })}
+      </div>
+    </ScrollArea>
   );
 }
+

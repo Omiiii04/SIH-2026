@@ -8,7 +8,6 @@ import { AppShell } from "@/components/layout/AppShell";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatContainer } from "@/components/chat/ChatContainer";
 import { ChatComposer } from "@/components/chat/ChatComposer";
-import { NodeStatusBar } from "@/components/nodes/NodeStatusBar";
 import { type MessageData } from "@/components/chat/ChatMessage";
 
 export default function DashboardPage() {
@@ -42,7 +41,6 @@ export default function DashboardPage() {
 
   const handleSend = useCallback(async (query: string, inputType: string, imageFile: File | null) => {
     // Build the effective query text FIRST so the user bubble is never blank.
-    // Backend requires min_length=1, so we substitute a descriptive placeholder.
     const effectiveQuery = query.trim() ||
       (imageFile ? `📎 ${imageFile.name}` : "[File attached]");
     const effectiveInputType =
@@ -99,13 +97,27 @@ export default function DashboardPage() {
     setMessages([]);
   }, []);
 
+  // Title for header based on first message
+  const conversationTitle = messages.length > 0 
+    ? (messages[0].content.length > 25 ? `${messages[0].content.slice(0, 25)}…` : messages[0].content)
+    : "SIH Assistant";
+
   // Avoid hydration mismatch by rendering a simple fallback before client load
   if (!isClient) return <div className="min-h-screen bg-background" />;
 
   return (
     <AppShell
-      sidebar={<Sidebar history={history} onNewChat={handleNewChat} />}
-      footer={<NodeStatusBar />}
+      title={conversationTitle}
+      sidebar={
+        <Sidebar 
+          history={history} 
+          onNewChat={handleNewChat} 
+          onSelectHistory={(entry) => {
+            // If user clicks a past query in history, populate or restart chat with that query
+            handleSend(entry.query, "text", null);
+          }}
+        />
+      }
     >
       <div className="flex flex-col h-full relative">
         <ChatContainer 
@@ -114,12 +126,12 @@ export default function DashboardPage() {
           onExampleClick={(query, type) => handleSend(query, type, null)} 
         />
         
-        {/* Composer fixed at bottom of chat area */}
-        <div className="sticky bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-background via-background to-transparent pt-10 mt-auto">
+        {/* Composer fixed at bottom center of chat area */}
+        <div className="sticky bottom-0 left-0 right-0 px-4 sm:px-6 pb-4 pt-4 bg-gradient-to-t from-background via-background/90 to-transparent mt-auto">
           <div className="max-w-3xl mx-auto w-full">
             <ChatComposer onSend={handleSend} loading={loading} />
-            <p className="text-center text-[10px] text-muted-foreground mt-2">
-              Distributed AI Orchestrator can make mistakes. Verify routing details in the Thinking panel.
+            <p className="text-center text-[11px] text-muted-foreground/60 mt-2 select-none">
+              AI can make mistakes. Verify important info.
             </p>
           </div>
         </div>
@@ -127,3 +139,4 @@ export default function DashboardPage() {
     </AppShell>
   );
 }
+

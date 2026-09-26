@@ -1,17 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRef } from "react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Send, Loader2, Plus, Type, Code, Brain, Database, Paperclip, File as FileIcon, Image as ImageIcon, X } from "lucide-react";
-
-const INPUT_TYPES = [
-  { value: "text",      label: "Text",      icon: Type },
-  { value: "code",      label: "Code",      icon: Code },
-  { value: "reasoning", label: "Reasoning", icon: Brain },
-  { value: "retrieval", label: "Retrieval", icon: Database },
-] as const;
+import { useState, useRef, useEffect } from "react";
+import { Plus, ArrowUp, Loader2, X, FileText } from "lucide-react";
 
 interface Props {
   onSend: (query: string, inputType: string, imageFile: File | null) => void;
@@ -19,145 +9,146 @@ interface Props {
 }
 
 export function ChatComposer({ onSend, loading }: Props) {
-  const [query, setQuery]           = useState("");
-  const [inputType, setInputType]   = useState("text");
-  const [menuOpen, setMenuOpen]     = useState(false);
-  const [file, setFile]             = useState<File | null>(null);
-  const fileInputRef                = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  function handleSubmit(e?: React.FormEvent) {
-    if (e) e.preventDefault();
-    if (!query.trim() && !file) return;
-    if (loading) return;
-    
-    onSend(query.trim(), inputType, file);
-    setQuery("");
-    setInputType("text");
-    setMenuOpen(false);
-    setFile(null);
-  }
+  // Manage object URL memory safely
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      return;
+    }
+    if (file.type.startsWith("image/")) {
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+      return () => {
+        URL.revokeObjectURL(url);
+      };
+    } else {
+      setPreviewUrl(null);
+    }
+  }, [file]);
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0]);
     }
-    setMenuOpen(false);
+    // reset input so selecting the same file again works
+    e.target.value = "";
   }
 
-  const selectedType = INPUT_TYPES.find(t => t.value === inputType) || INPUT_TYPES[0];
+  function handleRemoveFile() {
+    setFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function handleSubmit(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    if (!query.trim() && !file) return;
+    if (loading) return;
+
+    const inputType = file?.type.startsWith("image/") ? "image" : "text";
+    onSend(query.trim(), inputType, file);
+    setQuery("");
+    setFile(null);
+
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
+  }
+
+  function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setQuery(e.target.value);
+    // Auto-grow textarea up to 180px
+    const el = e.target;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+  }
+
+  const canSubmit = (query.trim().length > 0 || file !== null) && !loading;
 
   return (
-    <div className="relative bg-card border border-border/60 rounded-2xl shadow-sm focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 transition-all flex flex-col gap-1">
+    <div className="w-full bg-background rounded-2xl border border-border shadow-xs focus-within:border-foreground/30 transition-all flex flex-col p-1.5">
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileSelect}
+        className="hidden"
+        accept="image/*,.pdf,.txt,.py,.js,.json,.md"
+      />
+
+      {/* Attachment Preview Chip */}
       {file && (
-        <div className="flex items-center gap-2 p-2 mx-2 mt-2 bg-muted/50 rounded-lg text-xs border border-border/50 animate-in fade-in zoom-in-95">
-          {file.type.startsWith("image/") ? (
-            <div className="w-8 h-8 rounded bg-background border border-border flex items-center justify-center overflow-hidden shrink-0">
-              <img src={URL.createObjectURL(file)} alt="preview" className="object-cover w-full h-full" />
+        <div className="flex items-center gap-2 px-3 py-1.5 mb-1 bg-muted/60 rounded-xl text-xs w-fit max-w-[85%] border border-border/60 animate-in fade-in duration-150">
+          {previewUrl ? (
+            <div className="w-6 h-6 rounded bg-background border border-border overflow-hidden shrink-0">
+              <img src={previewUrl} alt="attachment preview" className="w-full h-full object-cover" />
             </div>
           ) : (
-            <div className="w-8 h-8 rounded bg-background border border-border flex items-center justify-center shrink-0">
-              <FileIcon size={14} className="text-muted-foreground" />
-            </div>
+            <FileText size={15} className="text-muted-foreground shrink-0" />
           )}
-          <span className="truncate font-medium flex-1">{file.name}</span>
-          <button onClick={() => setFile(null)} className="text-muted-foreground hover:text-foreground shrink-0 p-1" aria-label="Remove attachment">
-            <X size={14} />
+          <span className="truncate text-foreground font-medium text-xs max-w-[200px] sm:max-w-xs">
+            {file.name}
+          </span>
+          <button
+            type="button"
+            onClick={handleRemoveFile}
+            className="p-0.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors ml-1"
+            aria-label="Remove attachment"
+          >
+            <X size={13} />
           </button>
         </div>
       )}
-      
-      <div className="flex items-end gap-2 p-2">
-        <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileSelect} />
-        
-        {/* Plus Menu Button */}
-        <div className="relative">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={`h-9 w-9 rounded-xl text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-transform ${menuOpen ? 'rotate-45' : ''}`}
-            onClick={() => setMenuOpen(!menuOpen)}
-            aria-label="Input options"
-          >
-            <Plus size={18} />
-          </Button>
 
-          {/* Popover Menu */}
-          {menuOpen && (
-            <div className="absolute bottom-full left-0 mb-2 w-48 bg-card border border-border rounded-xl shadow-lg p-1.5 flex flex-col gap-0.5 z-10 animate-in fade-in zoom-in-95 origin-bottom-left">
-              <div className="px-2 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
-                Attach
-              </div>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors hover:bg-muted text-foreground"
-              >
-                <ImageIcon size={14} /> Upload image
-              </button>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors hover:bg-muted text-foreground mb-1"
-              >
-                <FileIcon size={14} /> Upload file
-              </button>
-              
-              <div className="border-t border-border/50 my-1"></div>
-              
-              <div className="px-2 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
-                Input Mode
-              </div>
-              {INPUT_TYPES.map((t) => (
-                <button
-                  key={t.value}
-                  type="button"
-                  onClick={() => { setInputType(t.value); setMenuOpen(false); }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${inputType === t.value ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground'}`}
-                >
-                  <t.icon size={14} />
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+      {/* Input Row */}
+      <div className="flex items-end gap-1 px-1">
+        {/* Attachment Button */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors shrink-0 mb-0.5"
+          aria-label="Attach file or image"
+        >
+          <Plus size={18} />
+        </button>
 
-        {/* Text Input */}
-        <div className="flex-1 min-h-[44px] flex flex-col justify-center relative">
-          {inputType !== 'text' && !query && (
-            <div className="absolute left-3 top-2.5 pointer-events-none flex items-center gap-1.5 text-xs font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-md">
-               <selectedType.icon size={10} /> {selectedType.label}
-            </div>
-          )}
-          <Textarea
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={
-              file
-                ? "Describe the image, or press Send to use the filename as the query…"
-                : inputType !== "text"
-                ? ""
-                : "Ask anything..."
+        {/* Textarea */}
+        <textarea
+          ref={textareaRef}
+          rows={1}
+          value={query}
+          onChange={handleInput}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSubmit();
             }
-            className={`min-h-[44px] max-h-[200px] resize-none bg-transparent border-0 focus-visible:ring-0 p-3 py-2.5 text-sm shadow-none ${inputType !== 'text' && !query ? 'indent-24' : ''}`}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
-            }}
-          />
-        </div>
+          }}
+          placeholder={file ? "Add instructions for the attachment..." : "Ask anything..."}
+          className="flex-1 max-h-[180px] min-h-[36px] py-2 px-2 text-[14.5px] leading-relaxed bg-transparent resize-none outline-none text-foreground placeholder:text-muted-foreground/70"
+        />
 
         {/* Send Button */}
-        <Button
+        <button
           type="button"
-          size="icon"
-          disabled={(!query.trim() && !file) || loading}
+          disabled={!canSubmit}
           onClick={() => handleSubmit()}
-          className="h-9 w-9 rounded-xl bg-primary text-primary-foreground shrink-0 shadow-sm"
+          className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 mb-0.5 transition-all ${
+            canSubmit
+              ? "bg-foreground text-background hover:opacity-90"
+              : "bg-muted text-muted-foreground/40 cursor-not-allowed"
+          }`}
+          aria-label="Send message"
         >
-          {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-        </Button>
+          {loading ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={16} />}
+        </button>
       </div>
     </div>
   );
 }
+

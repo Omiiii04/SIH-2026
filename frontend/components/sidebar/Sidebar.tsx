@@ -1,43 +1,74 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Search, Settings, Plus, Server } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import type { HistoryEntry } from "@/lib/types";
 import { ChatHistory } from "./ChatHistory";
 import { SemanticSearch } from "./SemanticSearch";
 import { SettingsPanel } from "./SettingsPanel";
 
-export function Sidebar({ history, onNewChat }: { history: HistoryEntry[]; onNewChat: () => void }) {
+interface SidebarProps {
+  history: HistoryEntry[];
+  onNewChat: () => void;
+  selectedRequestId?: string;
+  onSelectHistory?: (entry: HistoryEntry) => void;
+}
+
+export function Sidebar({ history, onNewChat, selectedRequestId, onSelectHistory }: SidebarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
-    <div className="flex flex-col h-full relative">
-      <div className="p-4 flex flex-col gap-2">
-        <Button onClick={onNewChat} variant="default" className="w-full justify-start gap-2 h-10 shadow-sm" aria-label="New chat">
-          <Plus size={16} /> New chat
-        </Button>
-        <div className="flex gap-2">
-          <Button onClick={() => setSearchOpen(true)} variant="outline" className="flex-1 justify-start gap-2 h-9 text-muted-foreground" aria-label="Semantic Search">
-            <Search size={14} /> Search memory...
-          </Button>
-        </div>
+    <div className="flex flex-col h-full bg-sidebar select-none">
+      {/* Top action: New chat */}
+      <div className="p-3 pb-2 flex flex-col gap-2">
+        <button
+          onClick={onNewChat}
+          className="flex items-center justify-between w-full px-3 py-2 text-sm font-medium rounded-lg border border-border/70 bg-background text-foreground hover:bg-muted/70 transition-colors shadow-2xs"
+          aria-label="New chat"
+        >
+          <span className="flex items-center gap-2">
+            <Plus size={16} />
+            <span>New chat</span>
+          </span>
+        </button>
+
+        <button
+          onClick={() => setSearchOpen(true)}
+          className="flex items-center gap-2 w-full px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors"
+          aria-label="Search memory"
+        >
+          <Search size={14} />
+          <span>Search memory...</span>
+        </button>
       </div>
 
-      <div className="flex-1 overflow-hidden">
-        <ChatHistory entries={history} />
+      {/* Chat History */}
+      <div className="flex-1 overflow-hidden px-1">
+        <ChatHistory
+          entries={history}
+          selectedId={selectedRequestId}
+          onSelect={onSelectHistory}
+        />
       </div>
 
-      <div className="p-3 border-t border-border mt-auto flex flex-col gap-1">
-        <a href="/admin">
-          <Button variant="ghost" className="w-full justify-start gap-2 text-muted-foreground">
-            <Server size={16} /> Nodes Admin
-          </Button>
-        </a>
-        <Button onClick={() => setSettingsOpen(true)} variant="ghost" className="w-full justify-start gap-2 text-muted-foreground">
-          <Settings size={16} /> Settings
-        </Button>
+      {/* Bottom utilities */}
+      <div className="p-2 border-t border-sidebar-border mt-auto flex flex-col gap-0.5">
+        <Link
+          href="/admin"
+          className="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+        >
+          <Server size={15} />
+          <span>Node Management</span>
+        </Link>
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors text-left"
+        >
+          <Settings size={15} />
+          <span>Settings</span>
+        </button>
       </div>
 
       {searchOpen && <SemanticSearch onClose={() => setSearchOpen(false)} />}
@@ -45,3 +76,4 @@ export function Sidebar({ history, onNewChat }: { history: HistoryEntry[]; onNew
     </div>
   );
 }
+

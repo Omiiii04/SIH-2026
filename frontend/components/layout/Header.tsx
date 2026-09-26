@@ -1,57 +1,66 @@
-import { Activity, Cpu, Wifi, WifiOff, Menu, PanelLeft } from "lucide-react";
+"use client";
+
+import Link from "next/link";
+import { Menu, PanelLeft, Server } from "lucide-react";
 import useSWR from "swr";
-import { fetchHealth, fetchNodes } from "@/lib/api";
+import { fetchHealth } from "@/lib/api";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 
-export function Header({ onMenuClick, onToggleSidebar }: { onMenuClick?: () => void, onToggleSidebar?: () => void }) {
-  const { data: health, error: healthError } = useSWR("/health", fetchHealth, { refreshInterval: 15_000 });
-  const { data: nodesData } = useSWR("/api/v1/nodes", fetchNodes, { refreshInterval: 15_000 });
+interface HeaderProps {
+  title?: string;
+  onMenuClick?: () => void;
+  onToggleSidebar?: () => void;
+}
 
-  const ok = !healthError && health?.status === "ok";
-  const nodes = nodesData?.nodes || [];
-  const onlineCount = nodes.filter(n => n.status === "ONLINE").length;
+export function Header({ title = "SIH Assistant", onMenuClick, onToggleSidebar }: HeaderProps) {
+  const { data: health, error: healthError } = useSWR("/health", fetchHealth, { refreshInterval: 30_000 });
+  const isOnline = !healthError && health?.status === "ok";
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-12 items-center px-4 md:px-6 gap-4">
+    <header className="sticky top-0 z-30 h-12 border-b border-border bg-background/80 backdrop-blur-md px-3 sm:px-4 flex items-center justify-between">
+      <div className="flex items-center gap-2">
         {onMenuClick && (
-          <button onClick={onMenuClick} className="md:hidden text-muted-foreground hover:text-foreground" aria-label="Open Mobile Menu">
+          <button
+            onClick={onMenuClick}
+            className="md:hidden p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            aria-label="Open sidebar"
+          >
             <Menu size={18} />
           </button>
         )}
         {onToggleSidebar && (
-          <button onClick={onToggleSidebar} className="hidden md:flex text-muted-foreground hover:text-foreground" aria-label="Toggle Sidebar">
+          <button
+            onClick={onToggleSidebar}
+            className="hidden md:flex p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            aria-label="Toggle sidebar"
+          >
             <PanelLeft size={18} />
           </button>
         )}
 
-        <div className="flex items-center gap-2">
-          {/* <div className="w-7 h-7 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center animate-glow">
-            <Cpu size={14} className="text-primary" />
-          </div> */}
-          <div className="hidden sm:flex flex-col justify-center">
-            <h1 className="text-sm font-semibold tracking-tight leading-tight">Distributed System</h1>
-            <p className="text-[10px] text-muted-foreground leading-tight">5-Node Inference Mesh</p>
-          </div>
+        <div className="flex items-center gap-2 ml-1">
+          <span className="text-sm font-medium tracking-tight text-foreground truncate max-w-[200px] sm:max-w-xs">
+            {title}
+          </span>
+          <span
+            title={isOnline ? "System Online" : "System Reconnecting"}
+            className={`w-1.5 h-1.5 rounded-full ${isOnline ? "bg-emerald-500" : "bg-amber-500/70"}`}
+          />
         </div>
+      </div>
 
-        <div className="ml-auto flex items-center gap-3">
-          <div className={`flex items-center gap-1.5 text-xs ${ok ? "text-green-500 dark:text-green-400" : "text-red-500 dark:text-red-400"}`}>
-            {ok ? <Wifi size={14} /> : <WifiOff size={14} />}
-            <span className="hidden sm:inline">
-              {ok ? `Orchestrator Online` : "Orchestrator Offline"}
-            </span>
-          </div>
-
-          <div className="hidden sm:block text-[10px] text-muted-foreground border-l border-border pl-3">
-            {nodes.length > 0 ? `${onlineCount}/${nodes.length} Nodes` : "Fetching nodes..."}
-          </div>
-
-          <Activity size={14} className="text-muted-foreground animate-pulse-online hidden md:block ml-2" />
-          <div className="w-px h-4 bg-border hidden sm:block" />
-          <ThemeToggle />
-        </div>
+      <div className="flex items-center gap-1">
+        <Link
+          href="/admin"
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors flex items-center gap-1.5 text-xs font-medium"
+          title="Nodes Management"
+        >
+          <Server size={15} />
+          <span className="hidden sm:inline">Admin</span>
+        </Link>
+        <ThemeToggle />
       </div>
     </header>
   );
 }
+
