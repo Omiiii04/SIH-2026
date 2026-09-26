@@ -612,3 +612,27 @@ class TestChromaStorage:
             )
         finally:
             ch_module._collection = original
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 6 — worker_node_id schema mapping regression test
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDatabaseSchemaRegression:
+    
+    @pytest.mark.asyncio
+    async def test_worker_model_fk_mapping(self):
+        """
+        REGRESSION TEST: Ensures WorkerModel.node_id in Python correctly maps
+        to the worker_node_id column in PostgreSQL.
+        """
+        from database.models import WorkerModel
+        
+        # We don't need to insert data, just check the compiled table metadata
+        # WorkerModel.__table__.columns contains the actual column names
+        columns = WorkerModel.__table__.columns.keys()
+        
+        assert "worker_node_id" in columns, "DB Column 'worker_node_id' is missing!"
+        assert "node_id" not in columns, "DB Column 'node_id' should not exist in worker_models table (it should be worker_node_id)"
+        
+        # Check Python-side attribute
+        assert hasattr(WorkerModel, "node_id"), "Python model MUST have 'node_id' attribute for API compatibility"
