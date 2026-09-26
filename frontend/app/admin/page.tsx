@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import useSWR, { mutate } from "swr";
+
 import { fetchNodes } from "@/lib/api";
 import { ArrowLeft, Server, Plus, Trash2, Power, PowerOff, RefreshCw } from "lucide-react";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
@@ -13,6 +14,19 @@ export default function AdminPage() {
   const [newName, setNewName] = useState("");
   const [newEndpoint, setNewEndpoint] = useState("");
   const [loading, setLoading] = useState(false);
+  const [returnHref, setReturnHref] = useState("/");
+
+  // Preserve active session id when returning to chat
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const sid = params.get("session_id");
+      if (sid) {
+        setReturnHref(`/?session_id=${encodeURIComponent(sid)}`);
+      }
+    }
+  }, []);
+
 
   const handleAddNode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,12 +79,13 @@ export default function AdminPage() {
       <header className="h-12 border-b border-border bg-background px-4 sm:px-8 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link
-            href="/"
+            href={returnHref}
             className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft size={14} />
             <span>Back to Chat</span>
           </Link>
+
           <span className="text-border">/</span>
           <span className="text-xs font-semibold text-foreground">Node Management</span>
         </div>

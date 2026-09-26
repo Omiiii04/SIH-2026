@@ -238,9 +238,53 @@ class WorkerModel(Base):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# sessions
+# ─────────────────────────────────────────────────────────────────────────────
+
+class Session(Base):
+    """
+    Persistent conversation session.
+    """
+
+    __tablename__ = "sessions"
+
+    id         = Column(String(64),  primary_key=True)
+    user_id    = Column(String(128), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    title      = Column(String(256), nullable=False)
+    created_at = Column(DateTime,    default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime,    default=datetime.utcnow, nullable=False, index=True)
+
+    messages   = relationship("Message", back_populates="session", cascade="all, delete-orphan", lazy="noload")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# messages
+# ─────────────────────────────────────────────────────────────────────────────
+
+class Message(Base):
+    """
+    Individual message within a conversation session.
+    """
+
+    __tablename__ = "messages"
+
+    id               = Column(String(64),  primary_key=True)
+    session_id       = Column(String(64),  ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id          = Column(String(128), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    role             = Column(String(16),  nullable=False)   # user | assistant
+    content          = Column(Text,        nullable=False)
+    request_id       = Column(String(64),  nullable=True)
+    routing_metadata = Column(Text,        nullable=True)   # JSON-encoded routing / inference metadata
+    created_at       = Column(DateTime,    default=datetime.utcnow, nullable=False, index=True)
+
+    session = relationship("Session", back_populates="messages", lazy="noload")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Backward-compat re-export used by database/models.py
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Legacy names kept so existing re-export in database/models.py doesn't break
 RequestLog = Request
-ConversationSession = None  # removed in Phase 4; use requests + session_id column
+ConversationSession = Session
+

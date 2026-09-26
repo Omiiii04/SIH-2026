@@ -16,10 +16,13 @@ from orchestrator.models import (  # noqa: F401  (re-export)
     User,
     WorkerNode,
     WorkerModel,
+    Session,
+    Message,
 )
 
 # Backward-compatible alias used by older code / tests
 RequestLog = Request
+ConversationSession = Session
 
 __all__ = [
     "Base",
@@ -30,4 +33,8 @@ __all__ = [
     "NodeHealth",
     "WorkerNode",
     "WorkerModel",
+    "Session",
+    "Message",
+    "ConversationSession",
 ]
+

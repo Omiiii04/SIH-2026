@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback, useId, useEffect } from "react";
-import { submitQuery } from "@/lib/api";
-import type { QueryResponse, NodeFailureResponse, HistoryEntry } from "@/lib/types";
+import { useState, useCallback, useEffect } from "react";
+import { submitQuery, fetchSessions, fetchSessionMessages, deleteSession } from "@/lib/api";
+import type { QueryResponse, NodeFailureResponse, SessionEntry } from "@/lib/types";
 
 import { AppShell } from "@/components/layout/AppShell";
 import { Sidebar } from "@/components/sidebar/Sidebar";
@@ -11,40 +11,104 @@ import { ChatComposer } from "@/components/chat/ChatComposer";
 import { type MessageData } from "@/components/chat/ChatMessage";
 
 export default function DashboardPage() {
-  const sessionId = useId().replace(/:/g, "");
-  
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [messages, setMessages] = useState<MessageData[]>([]);
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [isClient, setIsClient] = useState(false);
 
-  // Load history from localStorage on mount
-  useEffect(() => {
-    setIsClient(true);
-    const savedMsg = localStorage.getItem("chat_messages");
-    const savedHist = localStorage.getItem("chat_history");
-    if (savedMsg) {
-      try { setMessages(JSON.parse(savedMsg)); } catch {}
-    }
-    if (savedHist) {
-      try { setHistory(JSON.parse(savedHist)); } catch {}
+  // Load sessions from backend
+  const loadSessions = useCallback(async (selectSessionId?: string | null) => {
+    try {
+      const list = await fetchSessions("dashboard-user");
+      setSessions(list);
+
+      // Determine which session to activate
+      const toSelect = selectSessionId !== undefined 
+        ? selectSessionId 
+        : (typeof window !== "undefined" ? sessionStorage.getItem("active_session_id") : null);
+
+      if (toSelect && list.some(s => s.id === toSelect)) {
+        setActiveSessionId(toSelect);
+        const msgs = await fetchSessionMessages(toSelect, "dashboard-user");
+        setMessages(msgs);
+      } else if (!toSelect && list.length > 0) {
+        // Default to most recent session on fresh visit if desired
+        setActiveSessionId(list[0].id);
+        if (typeof window !== "undefined") sessionStorage.setItem("active_session_id", list[0].id);
+        const msgs = await fetchSessionMessages(list[0].id, "dashboard-user");
+        setMessages(msgs);
+      }
+    } catch (err) {
+      console.error("Failed to load sessions:", err);
     }
   }, []);
 
-  // Save to localStorage when state changes
+  // Initial load
   useEffect(() => {
-    if (isClient) {
-      localStorage.setItem("chat_messages", JSON.stringify(messages));
-      localStorage.setItem("chat_history", JSON.stringify(history));
+    setIsClient(true);
+    let targetSid: string | null = null;
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      targetSid = params.get("session_id");
     }
-  }, [messages, history, isClient]);
+    loadSessions(targetSid);
+  }, [loadSessions]);
+
+  // Load messages when selecting a history item
+  const handleSelectSession = useCallback(async (session: SessionEntry) => {
+    setActiveSessionId(session.id);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("active_session_id", session.id);
+    }
+    setLoading(true);
+    try {
+      const msgs = await fetchSessionMessages(session.id, "dashboard-user");
+      setMessages(msgs);
+    } catch (err) {
+      console.error("Failed to load messages for session:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Handle + New chat
+  const handleNewChat = useCallback(() => {
+    setActiveSessionId(null);
+    setMessages([]);
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem("active_session_id");
+    }
+  }, []);
+
+  // Delete session
+  const handleDeleteSession = useCallback(async (sessionId: string) => {
+    try {
+      await deleteSession(sessionId, "dashboard-user");
+      if (activeSessionId === sessionId) {
+        handleNewChat();
+      }
+      loadSessions(activeSessionId === sessionId ? null : activeSessionId);
+    } catch (err) {
+      console.error("Failed to delete session:", err);
+    }
+  }, [activeSessionId, handleNewChat, loadSessions]);
 
   const handleSend = useCallback(async (query: string, inputType: string, imageFile: File | null) => {
-    // Build the effective query text FIRST so the user bubble is never blank.
     const effectiveQuery = query.trim() ||
       (imageFile ? `📎 ${imageFile.name}` : "[File attached]");
     const effectiveInputType =
       imageFile?.type.startsWith("image/") ? "image" : inputType;
+
+    // Determine current or new session ID
+    let currentSessionId = activeSessionId;
+    if (!currentSessionId) {
+      currentSessionId = `sess-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+      setActiveSessionId(currentSessionId);
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("active_session_id", currentSessionId);
+      }
+    }
 
     const userMsgId = crypto.randomUUID();
     setMessages(prev => [...prev, { id: userMsgId, role: "user", content: effectiveQuery }]);
@@ -55,12 +119,10 @@ export default function DashboardPage() {
         user_id: "dashboard-user",
         query: effectiveQuery,
         input_type: effectiveInputType,
-        session_id: sessionId,
+        session_id: currentSessionId,
       });
 
       const qr = data as QueryResponse;
-      const fail = data as NodeFailureResponse;
-      
       const assistantMsgId = crypto.randomUUID();
       const content = ok ? qr.response : "I encountered an error processing your request.";
 
@@ -69,53 +131,45 @@ export default function DashboardPage() {
         role: "assistant",
         content: content,
         result: data,
-        ok: ok
+        ok: ok,
       }]);
 
-      setHistory(prev => [{
-        request_id: qr.request_id ?? crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
-        query: effectiveQuery,
-        selected_node: qr.selected_node ?? fail.selected_node ?? "—",
-        total_ms: qr.total_ms ?? fail.total_ms ?? 0,
-        status: (ok ? "success" : "error") as "success" | "error",
-      }, ...prev].slice(0, 50));
+      // Refresh sidebar sessions from PostgreSQL so title and updated_at appear
+      const updatedList = await fetchSessions("dashboard-user");
+      setSessions(updatedList);
 
     } catch (err) {
       console.error(err);
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: "Network error communicating with the Orchestrator."
+        content: "Network error communicating with the Orchestrator.",
       }]);
     } finally {
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [activeSessionId]);
 
-  const handleNewChat = useCallback(() => {
-    setMessages([]);
-  }, []);
+  // Active conversation title for Header
+  const activeSession = sessions.find(s => s.id === activeSessionId);
+  const conversationTitle = activeSession?.title 
+    || (messages.length > 0 
+      ? (messages[0].content.length > 28 ? `${messages[0].content.slice(0, 28)}…` : messages[0].content)
+      : "SIH Assistant");
 
-  // Title for header based on first message
-  const conversationTitle = messages.length > 0 
-    ? (messages[0].content.length > 25 ? `${messages[0].content.slice(0, 25)}…` : messages[0].content)
-    : "SIH Assistant";
-
-  // Avoid hydration mismatch by rendering a simple fallback before client load
   if (!isClient) return <div className="min-h-screen bg-background" />;
 
   return (
     <AppShell
       title={conversationTitle}
+      activeSessionId={activeSessionId}
       sidebar={
         <Sidebar 
-          history={history} 
+          sessions={sessions}
+          activeSessionId={activeSessionId}
           onNewChat={handleNewChat} 
-          onSelectHistory={(entry) => {
-            // If user clicks a past query in history, populate or restart chat with that query
-            handleSend(entry.query, "text", null);
-          }}
+          onSelectSession={handleSelectSession}
+          onDeleteSession={handleDeleteSession}
         />
       }
     >
@@ -139,4 +193,5 @@ export default function DashboardPage() {
     </AppShell>
   );
 }
+
 

@@ -39,15 +39,28 @@ logger = logging.getLogger(__name__)
 # Internal PostgreSQL writer
 # ─────────────────────────────────────────────────────────────────────────────
 
+def generate_title(query: str) -> str:
+    """Generate deterministic title from first query text."""
+    cleaned = " ".join(query.strip().split())
+    if not cleaned:
+        return "New Chat"
+    if len(cleaned) > 36:
+        return cleaned[:35].rstrip() + "…"
+    return cleaned
+
+
 async def _write_postgres_success(
     response: QueryResponse,
     request:  QueryRequest,
 ) -> None:
-    """Insert users / requests / routing_decisions rows for a successful query."""
+    """Insert users / requests / routing_decisions / sessions / messages rows."""
+    import json
     from database.postgres import get_session, upsert_user
-    from orchestrator.models import Request, RoutingDecision
+    from orchestrator.models import Request, RoutingDecision, Session, Message
+    from sqlalchemy import select
 
     request_uuid = uuid.UUID(response.request_id)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     async with get_session() as session:
         # 1. Ensure user exists
@@ -67,7 +80,7 @@ async def _write_postgres_success(
             selected_model = response.selected_model,
             status         = "success",
             latency_ms     = response.total_ms,
-            created_at     = datetime.now(timezone.utc).replace(tzinfo=None),
+            created_at     = now,
         )
         session.add(req_row)
 
@@ -80,9 +93,50 @@ async def _write_postgres_success(
             reason              = routing.reason,
             confidence          = cls.confidence if cls else None,
             was_fallback        = routing.was_fallback,
-            created_at          = datetime.now(timezone.utc).replace(tzinfo=None),
+            created_at          = now,
         )
         session.add(rd_row)
+
+        # 4. Handle persistent conversation session & messages if session_id provided
+        if response.session_id:
+            sess_stmt = select(Session).where(
+                Session.id == response.session_id,
+                Session.user_id == response.user_id,
+            )
+            existing_sess = (await session.execute(sess_stmt)).scalar_one_or_none()
+            if not existing_sess:
+                new_sess = Session(
+                    id=response.session_id,
+                    user_id=response.user_id,
+                    title=generate_title(request.query),
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(new_sess)
+            else:
+                existing_sess.updated_at = now
+
+            # User message
+            session.add(Message(
+                id=f"msg-{uuid.uuid4().hex[:12]}",
+                session_id=response.session_id,
+                user_id=response.user_id,
+                role="user",
+                content=request.query,
+                created_at=now,
+            ))
+
+            # Assistant message
+            session.add(Message(
+                id=f"msg-{uuid.uuid4().hex[:12]}",
+                session_id=response.session_id,
+                user_id=response.user_id,
+                role="assistant",
+                content=response.response,
+                request_id=response.request_id,
+                routing_metadata=json.dumps(response.model_dump(mode="json")),
+                created_at=now,
+            ))
 
         await session.commit()
 
@@ -94,10 +148,14 @@ async def _write_postgres_failure(
     request:  QueryRequest,
 ) -> None:
     """Insert users / requests row for a failed query (no routing_decisions row)."""
+    import json
     from database.postgres import get_session, upsert_user
-    from orchestrator.models import Request
+    from orchestrator.models import Request, Session, Message
+    from sqlalchemy import select
 
     request_uuid = uuid.UUID(response.request_id)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    session_id = getattr(request, "session_id", None) or getattr(response, "session_id", None)
 
     async with get_session() as session:
         await upsert_user(session, response.user_id)
@@ -105,18 +163,58 @@ async def _write_postgres_failure(
         req_row = Request(
             id             = request_uuid,
             user_id        = response.user_id,
-            session_id     = getattr(request, "session_id", None),
+            session_id     = session_id,
             query          = request.query,
             input_type     = request.input_type.value,
             selected_node  = response.selected_node,
             status         = response.error_type,   # connection_error / timeout / …
             latency_ms     = response.inference_ms,
-            created_at     = datetime.now(timezone.utc).replace(tzinfo=None),
+            created_at     = now,
         )
         session.add(req_row)
+
+        if session_id:
+            sess_stmt = select(Session).where(
+                Session.id == session_id,
+                Session.user_id == response.user_id,
+            )
+            existing_sess = (await session.execute(sess_stmt)).scalar_one_or_none()
+            if not existing_sess:
+                new_sess = Session(
+                    id=session_id,
+                    user_id=response.user_id,
+                    title=generate_title(request.query),
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(new_sess)
+            else:
+                existing_sess.updated_at = now
+
+            session.add(Message(
+                id=f"msg-{uuid.uuid4().hex[:12]}",
+                session_id=session_id,
+                user_id=response.user_id,
+                role="user",
+                content=request.query,
+                created_at=now,
+            ))
+
+            session.add(Message(
+                id=f"msg-{uuid.uuid4().hex[:12]}",
+                session_id=session_id,
+                user_id=response.user_id,
+                role="assistant",
+                content=f"Error: {response.detail or response.error_type}",
+                request_id=response.request_id,
+                routing_metadata=json.dumps(response.model_dump(mode="json")),
+                created_at=now,
+            ))
+
         await session.commit()
 
     logger.debug("[persist] PostgreSQL: wrote failure request for %s", response.request_id)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

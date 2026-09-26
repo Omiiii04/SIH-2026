@@ -8,16 +8,24 @@ import { ThemeToggle } from "@/components/layout/ThemeToggle";
 
 interface HeaderProps {
   title?: string;
+  activeSessionId?: string | null;
   onMenuClick?: () => void;
   onToggleSidebar?: () => void;
 }
 
-export function Header({ title = "SIH Assistant", onMenuClick, onToggleSidebar }: HeaderProps) {
+export function Header({
+  title = "SIH Assistant",
+  activeSessionId,
+  onMenuClick,
+  onToggleSidebar,
+}: HeaderProps) {
   const { data: health, error: healthError } = useSWR("/health", fetchHealth, { refreshInterval: 30_000 });
   const isOnline = !healthError && health?.status === "ok";
 
+  const adminHref = activeSessionId ? `/admin?session_id=${encodeURIComponent(activeSessionId)}` : "/admin";
+
   return (
-    <header className="sticky top-0 z-30 h-12 border-b border-border bg-background/80 backdrop-blur-md px-3 sm:px-4 flex items-center justify-between">
+    <header className="sticky top-0 z-30 h-12 border-b border-border bg-background/80 backdrop-blur-md px-3 sm:px-4 flex items-center justify-between select-none">
       <div className="flex items-center gap-2">
         {onMenuClick && (
           <button
@@ -39,7 +47,7 @@ export function Header({ title = "SIH Assistant", onMenuClick, onToggleSidebar }
         )}
 
         <div className="flex items-center gap-2 ml-1">
-          <span className="text-sm font-medium tracking-tight text-foreground truncate max-w-[200px] sm:max-w-xs">
+          <span className="text-sm font-medium tracking-tight text-foreground truncate max-w-[200px] sm:max-w-xs md:max-w-md">
             {title}
           </span>
           <span
@@ -51,16 +59,17 @@ export function Header({ title = "SIH Assistant", onMenuClick, onToggleSidebar }
 
       <div className="flex items-center gap-1">
         <Link
-          href="/admin"
+          href={adminHref}
           className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors flex items-center gap-1.5 text-xs font-medium"
-          title="Nodes Management"
+          title="Admin"
         >
           <Server size={15} />
-          <span className="hidden sm:inline">Admin</span>
+          <span>Admin</span>
         </Link>
         <ThemeToggle />
       </div>
     </header>
   );
 }
+
 

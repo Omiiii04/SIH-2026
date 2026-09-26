@@ -1,13 +1,14 @@
 "use client";
 
-import type { HistoryEntry } from "@/lib/types";
+import type { SessionEntry } from "@/lib/types";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageSquare } from "lucide-react";
 
 interface ChatHistoryProps {
-  entries: HistoryEntry[];
-  selectedId?: string;
-  onSelect?: (entry: HistoryEntry) => void;
+  sessions: SessionEntry[];
+  selectedSessionId?: string | null;
+  onSelectSession: (session: SessionEntry) => void;
+  onDeleteSession?: (sessionId: string) => void;
 }
 
 function categorizeDate(timestamp: string): "Today" | "Yesterday" | "Previous 7 Days" | "Older" {
@@ -26,26 +27,30 @@ function categorizeDate(timestamp: string): "Today" | "Yesterday" | "Previous 7 
   }
 }
 
-export function ChatHistory({ entries, selectedId, onSelect }: ChatHistoryProps) {
-  if (entries.length === 0) {
+export function ChatHistory({
+  sessions = [],
+  selectedSessionId,
+  onSelectSession,
+}: ChatHistoryProps) {
+  if (sessions.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-28 text-muted-foreground/60 text-center px-4">
+      <div className="flex flex-col items-center justify-center h-28 text-muted-foreground/60 text-center px-4 select-none">
         <MessageSquare size={16} className="mb-1.5 opacity-40" />
         <p className="text-xs">No chat history yet</p>
       </div>
     );
   }
 
-  const grouped: Record<string, HistoryEntry[]> = {
+  const grouped: Record<string, SessionEntry[]> = {
     Today: [],
     Yesterday: [],
     "Previous 7 Days": [],
     Older: [],
   };
 
-  for (const entry of entries) {
-    const cat = categorizeDate(entry.timestamp);
-    grouped[cat].push(entry);
+  for (const session of sessions) {
+    const cat = categorizeDate(session.updated_at || session.created_at);
+    grouped[cat].push(session);
   }
 
   const order: (keyof typeof grouped)[] = ["Today", "Yesterday", "Previous 7 Days", "Older"];
@@ -63,20 +68,20 @@ export function ChatHistory({ entries, selectedId, onSelect }: ChatHistoryProps)
                 {cat}
               </span>
               <div className="flex flex-col gap-0.5">
-                {items.map((entry) => {
-                  const isSelected = selectedId === entry.request_id;
+                {items.map((session) => {
+                  const isSelected = selectedSessionId === session.id;
                   return (
                     <button
-                      key={entry.request_id}
-                      onClick={() => onSelect?.(entry)}
-                      title={entry.query}
+                      key={session.id}
+                      onClick={() => onSelectSession(session)}
+                      title={session.title}
                       className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs truncate transition-colors ${
                         isSelected
                           ? "bg-muted text-foreground font-medium"
                           : "text-foreground/80 hover:bg-muted/60 hover:text-foreground"
                       }`}
                     >
-                      {entry.query}
+                      {session.title}
                     </button>
                   );
                 })}
@@ -88,4 +93,5 @@ export function ChatHistory({ entries, selectedId, onSelect }: ChatHistoryProps)
     </ScrollArea>
   );
 }
+
 

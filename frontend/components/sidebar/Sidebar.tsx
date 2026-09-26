@@ -1,21 +1,27 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { Search, Settings, Plus, Server } from "lucide-react";
-import type { HistoryEntry } from "@/lib/types";
+import { Search, Settings, Plus } from "lucide-react";
+import type { SessionEntry } from "@/lib/types";
 import { ChatHistory } from "./ChatHistory";
 import { SemanticSearch } from "./SemanticSearch";
 import { SettingsPanel } from "./SettingsPanel";
 
 interface SidebarProps {
-  history: HistoryEntry[];
+  sessions: SessionEntry[];
+  activeSessionId?: string | null;
   onNewChat: () => void;
-  selectedRequestId?: string;
-  onSelectHistory?: (entry: HistoryEntry) => void;
+  onSelectSession: (session: SessionEntry) => void;
+  onDeleteSession?: (sessionId: string) => void;
 }
 
-export function Sidebar({ history, onNewChat, selectedRequestId, onSelectHistory }: SidebarProps) {
+export function Sidebar({
+  sessions,
+  activeSessionId,
+  onNewChat,
+  onSelectSession,
+  onDeleteSession,
+}: SidebarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -47,21 +53,15 @@ export function Sidebar({ history, onNewChat, selectedRequestId, onSelectHistory
       {/* Chat History */}
       <div className="flex-1 overflow-hidden px-1">
         <ChatHistory
-          entries={history}
-          selectedId={selectedRequestId}
-          onSelect={onSelectHistory}
+          sessions={sessions}
+          selectedSessionId={activeSessionId}
+          onSelectSession={onSelectSession}
+          onDeleteSession={onDeleteSession}
         />
       </div>
 
       {/* Bottom utilities */}
       <div className="p-2 border-t border-sidebar-border mt-auto flex flex-col gap-0.5">
-        <Link
-          href="/admin"
-          className="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-        >
-          <Server size={15} />
-          <span>Node Management</span>
-        </Link>
         <button
           onClick={() => setSettingsOpen(true)}
           className="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors text-left"
@@ -76,4 +76,5 @@ export function Sidebar({ history, onNewChat, selectedRequestId, onSelectHistory
     </div>
   );
 }
+
 

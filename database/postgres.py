@@ -132,11 +132,36 @@ async def migrate_db() -> None:
         "ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS last_checked TIMESTAMP",
         # Last time the health monitor got a successful response
         "ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS last_success TIMESTAMP",
+        # sessions table
+        """CREATE TABLE IF NOT EXISTS sessions (
+            id VARCHAR(64) PRIMARY KEY,
+            user_id VARCHAR(128) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            title VARCHAR(256) NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_sessions_user_id ON sessions (user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_sessions_updated_at ON sessions (updated_at)",
+        # messages table
+        """CREATE TABLE IF NOT EXISTS messages (
+            id VARCHAR(64) PRIMARY KEY,
+            session_id VARCHAR(64) NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            user_id VARCHAR(128) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            role VARCHAR(16) NOT NULL,
+            content TEXT NOT NULL,
+            request_id VARCHAR(64),
+            routing_metadata TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_messages_session_id ON messages (session_id)",
+        "CREATE INDEX IF NOT EXISTS ix_messages_user_id ON messages (user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_messages_created_at ON messages (created_at)",
     ]
     async with engine.begin() as conn:
         for sql in migrations:
             await conn.execute(text(sql))
     logger.info("PostgreSQL: schema migrations applied.")
+
 
 
 async def close_db() -> None:

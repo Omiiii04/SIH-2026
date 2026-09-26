@@ -1,24 +1,33 @@
 "use client";
 
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
 import { Header } from "./Header";
 import { X } from "lucide-react";
 
 interface AppShellProps {
-  sidebar: ReactNode;
+  sidebar: ReactNode | ((close: () => void) => ReactNode);
   footer?: ReactNode;
   title?: string;
+  activeSessionId?: string | null;
   children: ReactNode;
 }
 
-export function AppShell({ sidebar, footer, title, children }: AppShellProps) {
+export function AppShell({ sidebar, footer, title, activeSessionId, children }: AppShellProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
+
+  // Automatically close mobile menu when active conversation changes
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [activeSessionId]);
+
+  const renderSidebar = typeof sidebar === "function" ? sidebar(() => setMobileMenuOpen(false)) : sidebar;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       <Header 
         title={title}
+        activeSessionId={activeSessionId}
         onMenuClick={() => setMobileMenuOpen(true)} 
         onToggleSidebar={() => setDesktopSidebarOpen(!desktopSidebarOpen)}
       />
@@ -39,7 +48,7 @@ export function AppShell({ sidebar, footer, title, children }: AppShellProps) {
               >
                 <X size={18} />
               </button>
-              {sidebar}
+              {renderSidebar}
             </div>
           </div>
         )}
@@ -51,9 +60,10 @@ export function AppShell({ sidebar, footer, title, children }: AppShellProps) {
           }`}
         >
           <div className="w-64 lg:w-68 h-full flex flex-col">
-            {sidebar}
+            {renderSidebar}
           </div>
         </aside>
+
 
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col relative overflow-hidden bg-background">

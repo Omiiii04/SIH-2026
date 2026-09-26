@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import List, Union
+from typing import List, Union, Optional
 import uuid
 
 import uvicorn
@@ -516,7 +516,172 @@ async def query(request: QueryRequest) -> JSONResponse:
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4.5: Persistent Chat Sessions & Message History
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CreateSessionRequest(BaseModel):
+    user_id: str = "dashboard-user"
+    title: Optional[str] = None
+    id: Optional[str] = None
+
+
+@app.get(
+    "/api/v1/sessions",
+    tags=["Sessions"],
+    summary="List chat sessions for a user",
+)
+async def list_sessions(user_id: str = "dashboard-user") -> dict:
+    """List all persisted conversation sessions for a given user, newest first."""
+    from database.postgres import get_session
+    from orchestrator.models import Session
+    from sqlalchemy import select, desc
+
+    try:
+        async with get_session() as session:
+            stmt = select(Session).where(Session.user_id == user_id).order_by(desc(Session.updated_at))
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            return {
+                "sessions": [
+                    {
+                        "id": s.id,
+                        "title": s.title,
+                        "created_at": s.created_at.isoformat(),
+                        "updated_at": s.updated_at.isoformat(),
+                    }
+                    for s in rows
+                ]
+            }
+    except Exception as exc:
+        logger.warning("list_sessions error: %s", exc)
+        return {"sessions": []}
+
+
+@app.post(
+    "/api/v1/sessions",
+    tags=["Sessions"],
+    summary="Create a new chat session",
+)
+async def create_session(req: CreateSessionRequest) -> dict:
+    """Explicitly create a new conversation session."""
+    from database.postgres import get_session, upsert_user
+    from orchestrator.models import Session
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    session_id = req.id or f"sess-{uuid.uuid4().hex[:12]}"
+    title = req.title or "New Chat"
+
+    async with get_session() as session:
+        await upsert_user(session, req.user_id)
+        new_sess = Session(
+            id=session_id,
+            user_id=req.user_id,
+            title=title,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(new_sess)
+        await session.commit()
+        return {
+            "id": new_sess.id,
+            "title": new_sess.title,
+            "created_at": new_sess.created_at.isoformat(),
+            "updated_at": new_sess.updated_at.isoformat(),
+        }
+
+
+@app.get(
+    "/api/v1/sessions/{session_id}",
+    tags=["Sessions"],
+    summary="Get session metadata",
+)
+async def get_session_info(session_id: str, user_id: str = "dashboard-user") -> dict:
+    """Retrieve metadata for a single session."""
+    from database.postgres import get_session
+    from orchestrator.models import Session
+    from sqlalchemy import select
+
+    async with get_session() as session:
+        stmt = select(Session).where(Session.id == session_id, Session.user_id == user_id)
+        res = (await session.execute(stmt)).scalar_one_or_none()
+        if not res:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {
+            "id": res.id,
+            "title": res.title,
+            "created_at": res.created_at.isoformat(),
+            "updated_at": res.updated_at.isoformat(),
+        }
+
+
+@app.get(
+    "/api/v1/sessions/{session_id}/messages",
+    tags=["Sessions"],
+    summary="Get all messages in a session",
+)
+async def get_session_messages(session_id: str, user_id: str = "dashboard-user") -> dict:
+    """Retrieve all messages in a conversation session in chronological order."""
+    import json
+    from database.postgres import get_session
+    from orchestrator.models import Message
+    from sqlalchemy import select, asc
+
+    try:
+        async with get_session() as session:
+            stmt = (
+                select(Message)
+                .where(Message.session_id == session_id, Message.user_id == user_id)
+                .order_by(asc(Message.created_at))
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+            messages = []
+            for m in rows:
+                meta = None
+                if m.routing_metadata:
+                    try:
+                        meta = json.loads(m.routing_metadata)
+                    except Exception:
+                        meta = None
+                messages.append({
+                    "id": m.id,
+                    "session_id": m.session_id,
+                    "role": m.role,
+                    "content": m.content,
+                    "request_id": m.request_id,
+                    "result": meta,
+                    "ok": m.role == "user" or (meta and "error_type" not in meta),
+                    "created_at": m.created_at.isoformat(),
+                })
+            return {"messages": messages}
+    except Exception as exc:
+        logger.warning("get_session_messages error: %s", exc)
+        return {"messages": []}
+
+
+@app.delete(
+    "/api/v1/sessions/{session_id}",
+    tags=["Sessions"],
+    summary="Delete a chat session and its messages",
+)
+async def delete_session(session_id: str, user_id: str = "dashboard-user") -> dict:
+    """Delete a conversation session."""
+    from database.postgres import get_session
+    from orchestrator.models import Session
+    from sqlalchemy import select
+
+    async with get_session() as session:
+        stmt = select(Session).where(Session.id == session_id, Session.user_id == user_id)
+        res = (await session.execute(stmt)).scalar_one_or_none()
+        if not res:
+            raise HTTPException(status_code=404, detail="Session not found")
+        await session.delete(res)
+        await session.commit()
+        return {"deleted": True, "session_id": session_id}
+
+
 # Phase 4: Semantic Memory Search
+
 
 @app.post(
     "/api/v1/memory/search",
