@@ -192,6 +192,11 @@ class ClassificationResult(BaseModel):
     confidence: float = 1.0                     # 0.0–1.0
     classifier_method: ClassifierMethod = ClassifierMethod.RULE_DEFAULT
 
+    # Phase 6 Additions
+    input_modalities: List[str] = Field(default_factory=list)
+    task_types: List[str] = Field(default_factory=list)
+    required_capabilities: List[str] = Field(default_factory=list)
+
 
 class RoutingDecision(BaseModel):
     """Explains why a specific node was chosen."""

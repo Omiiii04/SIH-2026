@@ -80,11 +80,15 @@ async def lifespan(app: FastAPI):
 
     # Phase 5: start background health monitor
     try:
+        from orchestrator.node_manager import bootstrap_nodes
+        await bootstrap_nodes()
+        logger.info("Phase 2.5: Dynamic nodes bootstrapped.")
+        
         from orchestrator.monitor import start_monitor
         start_monitor()
         logger.info("Phase 5: node health monitor started.")
     except Exception as exc:
-        logger.warning("Health monitor failed to start: %s", exc)
+        logger.warning("Health monitor or bootstrap failed: %s", exc)
 
     yield
 
@@ -129,6 +133,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 # Health routes
@@ -177,41 +182,76 @@ async def cluster_health() -> ClusterHealthResponse:
 @app.get(
     "/api/v1/nodes",
     tags=["Phase 5 Monitoring"],
-    summary="Node health status (ONLINE/DEGRADED/OFFLINE)",
-    response_model=NodeStatusResponse,
+    summary="Node health status and capabilities",
 )
-async def get_node_statuses() -> NodeStatusResponse:
+async def get_node_statuses() -> dict:
     """
-    Returns Phase 5 three-state status for all nodes as tracked by the
-    background health monitor. Falls back to registry status if monitor
-    has not run yet.
+    Returns full node statuses including dynamic DB nodes and multiple models.
+    """
+    from orchestrator.monitor import get_node_status_entries
+    from database.postgres import get_session
+    from database.models import WorkerNode
+    from sqlalchemy import select
+    from orchestrator.scheduler import discover_capabilities
 
-    Example response:
-        {
-          "nodes": [
-            {"node_id": "NODE-TEXT", "status": "ONLINE", "latency_ms": 320},
-            ...
-          ]
-        }
-    """
-    from orchestrator.monitor import get_node_status_entries, _NODE_STATES
-    from orchestrator.schemas import NodeStatus, NodeStatusEntry
+    # Fetch DB nodes to augment status
+    db_nodes_map = {}
+    async with get_session() as session:
+        result = await session.execute(select(WorkerNode))
+        for n in result.scalars().all():
+            db_nodes_map[n.id] = {
+                "name": n.name,
+                "endpoint": n.endpoint,
+                "enabled": n.enabled,
+                "models": [m.model_id for m in n.models]
+            }
 
     entries = get_node_status_entries()
-
-    # If monitor hasn't populated states yet, fall back to registry
+    
+    # Fallback to db nodes if monitor hasn't run yet
     if not entries:
-        registry_nodes = list_nodes()
-        entries = [
-            NodeStatusEntry(
-                node_id=n.node_id,
-                status=NodeStatus.OFFLINE if n.status == "offline" else NodeStatus.ONLINE,
-                latency_ms=None,
-            )
-            for n in registry_nodes
-        ]
+        from orchestrator.schemas import NodeStatus, NodeStatusEntry
+        for nid, ninfo in db_nodes_map.items():
+            if ninfo["enabled"]:
+                entries.append(NodeStatusEntry(
+                    node_id=nid,
+                    status=NodeStatus.ONLINE if ninfo["models"] else NodeStatus.OFFLINE,
+                    latency_ms=None
+                ))
 
-    return NodeStatusResponse(nodes=entries)
+    # Format the combined response
+    formatted_nodes = []
+    for e in entries:
+        nid = e.node_id
+        ninfo = db_nodes_map.get(nid, {})
+        models = ninfo.get("models", [])
+        
+        # Merge monitor models if DB is lacking
+        from orchestrator.monitor import _NODE_STATES
+        state = _NODE_STATES.get(nid)
+        if state and state.models_loaded:
+            models = list(set(models + state.models_loaded))
+            
+        caps = set()
+        from orchestrator.node_registry import _REGISTRY, NodeRegistryEntry
+        registry_entry = _REGISTRY.get(nid) or NodeRegistryEntry(node_id=nid, endpoint=ninfo.get("endpoint", ""), status="unknown", node_name=ninfo.get("name", ""), capability="", node_type="", model="", supported_input_types=[])
+        for m in models:
+            caps.update(discover_capabilities(registry_entry, m))
+            
+        formatted_nodes.append({
+            "node_id": nid,
+            "name": ninfo.get("name", nid),
+            "endpoint": ninfo.get("endpoint", ""),
+            "enabled": ninfo.get("enabled", True),
+            "status": e.status,
+            "latency_ms": e.latency_ms,
+            "models": models,
+            "capabilities": sorted(list(caps)),
+            "last_checked": e.last_checked,
+            "last_success": e.last_success
+        })
+        
+    return {"nodes": formatted_nodes}
 
 
 @app.get(
@@ -230,7 +270,151 @@ async def get_metrics() -> MetricsResponse:
     return MetricsResponse(**snap)
 
 
-# Node registry routes (unchanged)
+from pydantic import BaseModel
+class AddNodeRequest(BaseModel):
+    name: str
+    endpoint: str
+    priority: int = 1
+
+@app.post(
+    "/api/v1/nodes",
+    tags=["Phase 2.5 Registry"],
+    summary="Add a new dynamic LAN node",
+)
+async def add_node(req: AddNodeRequest) -> dict:
+    from orchestrator.node_manager import _normalize_endpoint, probe_node, sync_registry_from_db
+    from database.postgres import get_session
+    from database.models import WorkerNode
+    from sqlalchemy import select
+    import uuid
+
+    norm_endpoint = _normalize_endpoint(req.endpoint)
+    if not norm_endpoint.startswith("http"):
+        raise HTTPException(status_code=400, detail="Invalid endpoint URL")
+
+    async with get_session() as session:
+        # Check duplicate
+        result = await session.execute(select(WorkerNode).where(WorkerNode.endpoint == norm_endpoint))
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Node with this endpoint already exists")
+
+        node_id = f"NODE-{uuid.uuid4().hex[:6].upper()}"
+        node = WorkerNode(
+            id=node_id,
+            name=req.name,
+            endpoint=norm_endpoint,
+            enabled=True,
+            priority=req.priority
+        )
+        session.add(node)
+        await session.commit()
+    
+    probe_result = await probe_node(node_id)
+    return {"message": "Node added successfully", "node_id": node_id, "probe": probe_result}
+
+@app.post(
+    "/api/v1/nodes/{node_id}/probe",
+    tags=["Phase 2.5 Registry"],
+    summary="Manually probe a node and refresh models",
+)
+async def api_probe_node(node_id: str) -> dict:
+    from orchestrator.node_manager import probe_node
+    try:
+        return await probe_node(node_id.upper())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+@app.post(
+    "/api/v1/nodes/{node_id}/enable",
+    tags=["Phase 2.5 Registry"],
+    summary="Enable a disabled node",
+)
+async def enable_node(node_id: str) -> dict:
+    from database.postgres import get_session
+    from database.models import WorkerNode
+    from orchestrator.node_manager import probe_node
+    
+    node_id = node_id.upper()
+    async with get_session() as session:
+        node = await session.get(WorkerNode, node_id)
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+        node.enabled = True
+        await session.commit()
+    
+    probe_result = await probe_node(node_id)
+    return {"message": "Node enabled", "node_id": node_id, "probe": probe_result}
+
+@app.post(
+    "/api/v1/nodes/{node_id}/disable",
+    tags=["Phase 2.5 Registry"],
+    summary="Disable an active node",
+)
+async def disable_node(node_id: str) -> dict:
+    from database.postgres import get_session
+    from database.models import WorkerNode
+    from orchestrator.node_manager import sync_registry_from_db
+    from orchestrator.node_registry import set_node_status
+    
+    node_id = node_id.upper()
+    async with get_session() as session:
+        node = await session.get(WorkerNode, node_id)
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+        node.enabled = False
+        await session.commit()
+        
+    set_node_status(node_id, "offline")
+    await sync_registry_from_db()
+    return {"message": "Node disabled", "node_id": node_id}
+
+@app.delete(
+    "/api/v1/nodes/{node_id}",
+    tags=["Phase 2.5 Registry"],
+    summary="Soft-delete (disable) a node",
+)
+async def delete_node(node_id: str) -> dict:
+    # Soft delete is just disable for now to preserve history
+    return await disable_node(node_id)
+
+@app.get(
+    "/api/v1/nodes/{node_id}",
+    tags=["Phase 2.5 Registry"],
+    summary="Get single dynamic LAN node",
+)
+async def get_node(node_id: str) -> dict:
+    from database.postgres import get_session
+    from database.models import WorkerNode
+    from orchestrator.monitor import _NODE_STATES
+    from orchestrator.scheduler import discover_capabilities
+    
+    node_id = node_id.upper()
+    async with get_session() as session:
+        node = await session.get(WorkerNode, node_id)
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+            
+    models = [m.model_id for m in node.models]
+    state = _NODE_STATES.get(node_id)
+    if state and state.models_loaded:
+        models = list(set(models + state.models_loaded))
+        
+    caps = set()
+    from orchestrator.node_registry import _REGISTRY, NodeRegistryEntry
+    registry_entry = _REGISTRY.get(node_id) or NodeRegistryEntry(node_id=node_id, endpoint=node.endpoint, status=node.status, node_name=node.name, capability="", node_type="", model="", supported_input_types=[])
+    for m in models:
+        caps.update(discover_capabilities(registry_entry, m))
+        
+    return {
+        "node_id": node.id,
+        "name": node.name,
+        "endpoint": node.endpoint,
+        "enabled": node.enabled,
+        "status": state.status if state else node.status,
+        "latency_ms": state.latency_ms if state else None,
+        "models": models,
+        "capabilities": sorted(list(caps)),
+    }
 
 @app.patch(
     "/api/v1/nodes/{node_id}/status",

@@ -211,63 +211,85 @@ def _classify_by_rules(
     query: str,
     input_type: InputType,
 ) -> ClassificationResult:
-    """
-    Deterministic rule-based classification.
-
-    Priority:
-      1. Non-TEXT explicit input_type  (confidence=1.0)
-      2. Keyword / pattern rules       (confidence per rule)
-      3. Default fallback → TEXT       (confidence=0.55)
-    """
-    # ── Priority 1: explicit non-TEXT input_type ──────────────────────────────
-    if input_type != InputType.TEXT:
-        node_type  = _INPUT_TYPE_MAP[input_type]
-        task_type  = _INPUT_TYPE_TASK[input_type]
-        capability = _NODE_TYPE_TO_CAPABILITY[node_type]
-        return ClassificationResult(
-            input_type=input_type,
-            node_type=node_type,
-            task_type=task_type,
-            difficulty=Difficulty.MEDIUM,
-            required_capability=capability,
-            confidence=1.0,
-            classifier_method=ClassifierMethod.RULE_EXPLICIT,
-            matched_rule=f"explicit_input_type:{input_type.value}",
-        )
-
-    # ── Priority 2: keyword scan ──────────────────────────────────────────────
     query_lower = query.lower()
+    
+    input_modalities = {"text"}
+    if input_type == InputType.IMAGE or "image" in query_lower or "picture" in query_lower or "photo" in query_lower:
+        input_modalities.add("image")
+    elif input_type == InputType.CODE:
+        input_modalities.add("code")
+        
+    tasks = set()
+    caps = set()
+    best_confidence = 0.55
+    best_method = ClassifierMethod.RULE_DEFAULT
+    matched_rules = []
+    
+    best_task = None
+    best_cap = None
+
+    if input_type != InputType.TEXT:
+        node_type  = _INPUT_TYPE_MAP.get(input_type, NodeType.TEXT)
+        task_type  = _INPUT_TYPE_TASK.get(input_type, TaskType.GENERAL_QA)
+        capability = _NODE_TYPE_TO_CAPABILITY.get(node_type, "text")
+        tasks.add(task_type.value)
+        caps.add(capability)
+        best_confidence = 1.0
+        best_method = ClassifierMethod.RULE_EXPLICIT
+        best_task = task_type
+        best_cap = capability
+        matched_rules.append(f"explicit_input_type:{input_type.value}")
+
     for rule in _RULES:
         for kw in rule.keywords:
             if kw in query_lower:
-                difficulty = _estimate_difficulty(query_lower, rule.difficulty)
-                capability = _NODE_TYPE_TO_CAPABILITY[rule.node_type]
-                logger.debug(
-                    "Rule fired: rule=%s keyword='%s' → node=%s task=%s",
-                    rule.rule_name, kw, rule.node_type, rule.task_type,
-                )
-                return ClassificationResult(
-                    input_type=input_type,
-                    node_type=rule.node_type,
-                    task_type=rule.task_type,
-                    difficulty=difficulty,
-                    required_capability=capability,
-                    confidence=rule.confidence,
-                    classifier_method=ClassifierMethod.RULE_KEYWORD,
-                    matched_rule=f"{rule.rule_name}:{kw.strip()}",
-                )
-
-    # ── Priority 3: default fallback ──────────────────────────────────────────
+                tasks.add(rule.task_type.value)
+                rule_cap = _NODE_TYPE_TO_CAPABILITY.get(rule.node_type, "text")
+                caps.add(rule_cap)
+                if rule.confidence > best_confidence or best_task is None:
+                    best_confidence = rule.confidence
+                    best_method = ClassifierMethod.RULE_KEYWORD
+                    best_task = rule.task_type
+                    best_cap = rule_cap
+                matched_rules.append(f"{rule.rule_name}:{kw.strip()}")
+                
+    if not tasks:
+        tasks.add(TaskType.GENERAL_QA.value)
+        caps.add("text")
+        matched_rules.append("default_fallback")
+        
+    if best_task is None:
+        best_task = TaskType.GENERAL_QA
+        best_cap = "text"
+        
     difficulty = _estimate_difficulty(query_lower, Difficulty.MEDIUM)
+    if len(tasks) > 1:
+        difficulty = Difficulty.HIGH
+        
+    primary_task = best_task
+    primary_cap = best_cap
+    
+    _cap_to_node = {
+        "text": NodeType.TEXT,
+        "vision": NodeType.VISION,
+        "coding": NodeType.CODE,
+        "reasoning": NodeType.REASONING,
+        "embedding/retrieval": NodeType.RAG,
+    }
+    primary_node = _cap_to_node.get(primary_cap, NodeType.TEXT)
+
     return ClassificationResult(
         input_type=input_type,
-        node_type=NodeType.TEXT,
-        task_type=TaskType.GENERAL_QA,
+        node_type=primary_node,
+        task_type=primary_task,
         difficulty=difficulty,
-        required_capability="text",
-        confidence=0.55,            # low confidence — good LLM escalation candidate
-        classifier_method=ClassifierMethod.RULE_DEFAULT,
-        matched_rule="default_fallback",
+        required_capability=primary_cap,
+        confidence=best_confidence,
+        classifier_method=best_method,
+        matched_rule=" | ".join(matched_rules),
+        input_modalities=list(input_modalities),
+        task_types=list(tasks),
+        required_capabilities=list(caps)
     )
 
 

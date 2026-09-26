@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Search, Settings, Plus } from "lucide-react";
+import { Search, Settings, Plus, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { HistoryEntry } from "@/lib/types";
 import { ChatHistory } from "./ChatHistory";
@@ -29,7 +29,12 @@ export function Sidebar({ history, onNewChat }: { history: HistoryEntry[]; onNew
         <ChatHistory entries={history} />
       </div>
 
-      <div className="p-3 border-t border-border mt-auto">
+      <div className="p-3 border-t border-border mt-auto flex flex-col gap-1">
+        <a href="/admin">
+          <Button variant="ghost" className="w-full justify-start gap-2 text-muted-foreground">
+            <Server size={16} /> Nodes Admin
+          </Button>
+        </a>
         <Button onClick={() => setSettingsOpen(true)} variant="ghost" className="w-full justify-start gap-2 text-muted-foreground">
           <Settings size={16} /> Settings
         </Button>

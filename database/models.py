@@ -14,6 +14,8 @@ from orchestrator.models import (  # noqa: F401  (re-export)
     Request,
     RoutingDecision,
     User,
+    WorkerNode,
+    WorkerModel,
 )
 
 # Backward-compatible alias used by older code / tests
@@ -26,4 +28,6 @@ __all__ = [
     "RequestLog",   # alias
     "RoutingDecision",
     "NodeHealth",
+    "WorkerNode",
+    "WorkerModel",
 ]

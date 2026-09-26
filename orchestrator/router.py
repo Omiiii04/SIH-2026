@@ -155,24 +155,29 @@ async def handle_query(
     last_node_id: str = preferred_node_id
     routing: RoutingDecision | None = None
 
+    from orchestrator.scheduler import select_best_candidates
+
     for attempt in range(MAX_RETRIES):
-        node = get_online_node_for_capability(cls.required_capability, skip_ids=tried_nodes)
+        candidates = select_best_candidates(cls, skip_ids=tried_nodes)
 
         # No more fresh nodes (all tried or all offline)
-        if node is None:
+        if not candidates:
             logger.warning(
-                "[%s] No fresh online node for capability=%s (attempt %d)",
+                "[%s] No fresh online candidates for capability=%s (attempt %d)",
                 request_id, cls.required_capability, attempt + 1,
             )
             break
 
+        node, model_name, score, scheduler_reason = candidates[0]
         tried_nodes.add(node.node_id)
         last_node_id = node.node_id
+        
         routing = _build_routing_decision(cls, node.node_id, preferred_node_id)
+        routing.reason += f" | Scheduler: {scheduler_reason}"
 
         logger.info(
-            "[%s] Attempt %d/%d  node=%s  fallback=%s",
-            request_id, attempt + 1, MAX_RETRIES, node.node_id, routing.was_fallback,
+            "[%s] Attempt %d/%d  node=%s  fallback=%s  score=%.1f",
+            request_id, attempt + 1, MAX_RETRIES, node.node_id, routing.was_fallback, score,
         )
 
         t_call_start = time.monotonic()
@@ -189,7 +194,7 @@ async def handle_query(
         try:
             lm_resp: LMResponse = await call_node(
                 endpoint=node.endpoint,
-                model=node.model,   # live model id, e.g. "gemma-4-e4b-it-qat"
+                model=model_name,   # live model id selected by scheduler
                 query=request.query,
                 parameters=request.parameters,
                 timeout=node_timeout,
