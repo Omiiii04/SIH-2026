@@ -111,6 +111,34 @@ async def init_db() -> None:
     logger.info("PostgreSQL: all tables created / verified.")
 
 
+async def migrate_db() -> None:
+    """
+    Idempotent column additions for tables that already exist in production.
+
+    Uses ``ADD COLUMN IF NOT EXISTS`` so it is safe to run on every startup.
+    Does NOT drop or rename columns — only adds missing ones.
+    Preserves all existing row data.
+    """
+    engine = _get_engine()
+    # worker_nodes — add columns introduced by the dynamic node architecture
+    migrations = [
+        # Human-readable display name (NODE_N_NAME from .env)
+        "ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS name VARCHAR(128)",
+        # Whether this node is in the active .env pool
+        "ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE",
+        # Scheduling priority (NODE_N_PRIORITY from .env, lower = higher priority)
+        "ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 1",
+        # Last time the health monitor probed this node
+        "ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS last_checked TIMESTAMP",
+        # Last time the health monitor got a successful response
+        "ALTER TABLE worker_nodes ADD COLUMN IF NOT EXISTS last_success TIMESTAMP",
+    ]
+    async with engine.begin() as conn:
+        for sql in migrations:
+            await conn.execute(text(sql))
+    logger.info("PostgreSQL: schema migrations applied.")
+
+
 async def close_db() -> None:
     """Dispose the engine connection pool. Call at application shutdown."""
     global _engine, _session_factory

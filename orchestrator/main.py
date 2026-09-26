@@ -65,9 +65,10 @@ async def lifespan(app: FastAPI):
 
     # PostgreSQL
     try:
-        from database.postgres import init_db
+        from database.postgres import init_db, migrate_db
         await init_db()
         logger.info("PostgreSQL: tables ready.")
+        await migrate_db()
     except Exception as exc:
         logger.warning("PostgreSQL unavailable at startup: %s -- persistence disabled.", exc)
 
@@ -78,17 +79,18 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("ChromaDB unavailable at startup: %s -- memory search disabled.", exc)
 
-    # Phase 5: start background health monitor
+    # Reconcile .env node configuration with PostgreSQL on every startup.
+    # This creates new nodes, updates changed ones, and disables removed ones.
     try:
-        from orchestrator.node_manager import bootstrap_nodes
-        await bootstrap_nodes()
-        logger.info("Phase 2.5: Dynamic nodes bootstrapped.")
-        
+        from orchestrator.node_manager import reconcile_nodes_from_env
+        await reconcile_nodes_from_env()
+        logger.info("Node configuration reconciled from .env.")
+
         from orchestrator.monitor import start_monitor
         start_monitor()
-        logger.info("Phase 5: node health monitor started.")
+        logger.info("Node health monitor started.")
     except Exception as exc:
-        logger.warning("Health monitor or bootstrap failed: %s", exc)
+        logger.warning("Node reconciliation or monitor failed: %s", exc)
 
     yield
 
@@ -198,8 +200,8 @@ async def get_node_statuses() -> dict:
     db_nodes_map = {}
     async with get_session() as session:
         result = await session.execute(select(WorkerNode))
-        for n in result.scalars().all():
-            db_nodes_map[n.id] = {
+        for n in result.unique().scalars().all():
+            db_nodes_map[n.node_id] = {   # key by string node_id, not UUID
                 "name": n.name,
                 "endpoint": n.endpoint,
                 "enabled": n.enabled,
@@ -208,16 +210,27 @@ async def get_node_statuses() -> dict:
 
     entries = get_node_status_entries()
     
-    # Fallback to db nodes if monitor hasn't run yet
+    # Fallback 1: DB nodes if monitor hasn't run yet
     if not entries:
         from orchestrator.schemas import NodeStatus, NodeStatusEntry
-        for nid, ninfo in db_nodes_map.items():
+        for node_id_str, ninfo in db_nodes_map.items():
             if ninfo["enabled"]:
                 entries.append(NodeStatusEntry(
-                    node_id=nid,
+                    node_id=node_id_str,
                     status=NodeStatus.ONLINE if ninfo["models"] else NodeStatus.OFFLINE,
                     latency_ms=None
                 ))
+
+    # Fallback 2: in-memory registry (test environments / no DB)
+    if not entries:
+        from orchestrator.schemas import NodeStatus, NodeStatusEntry
+        import orchestrator.node_registry as _reg
+        for nid, entry in _reg._REGISTRY.items():
+            entries.append(NodeStatusEntry(
+                node_id=nid,
+                status=NodeStatus(entry.status) if entry.status in ("online", "offline") else NodeStatus.OFFLINE,
+                latency_ms=None,
+            ))
 
     # Format the combined response
     formatted_nodes = []
@@ -231,13 +244,24 @@ async def get_node_statuses() -> dict:
         state = _NODE_STATES.get(nid)
         if state and state.models_loaded:
             models = list(set(models + state.models_loaded))
-            
+
         caps = set()
         from orchestrator.node_registry import _REGISTRY, NodeRegistryEntry
-        registry_entry = _REGISTRY.get(nid) or NodeRegistryEntry(node_id=nid, endpoint=ninfo.get("endpoint", ""), status="unknown", node_name=ninfo.get("name", ""), capability="", node_type="", model="", supported_input_types=[])
+        from orchestrator.schemas import NodeType as _NT
+        registry_entry = _REGISTRY.get(nid) or NodeRegistryEntry(
+            node_id=nid,
+            endpoint=ninfo.get("endpoint", ""),
+            status="unknown",
+            node_name=ninfo.get("name", nid),
+            capability="text",
+            node_type=_NT.TEXT,
+            model="",
+            supported_input_types=["text"],
+            priority=1,
+        )
         for m in models:
             caps.update(discover_capabilities(registry_entry, m))
-            
+
         formatted_nodes.append({
             "node_id": nid,
             "name": ninfo.get("name", nid),
@@ -376,6 +400,27 @@ async def disable_node(node_id: str) -> dict:
 async def delete_node(node_id: str) -> dict:
     # Soft delete is just disable for now to preserve history
     return await disable_node(node_id)
+
+
+@app.post(
+    "/api/v1/nodes/sync-config",
+    tags=["Admin"],
+    summary="Re-read .env and reconcile node pool without restarting",
+)
+async def sync_node_config() -> dict:
+    """
+    Re-reads the .env file and reconciles the node pool with PostgreSQL.
+
+    Use this after editing .env to add/remove/update nodes without
+    restarting the orchestrator process.
+
+    Returns the number of currently active (enabled) nodes.
+    """
+    from orchestrator.node_manager import reconcile_nodes_from_env
+    from orchestrator.node_registry import list_nodes
+    await reconcile_nodes_from_env()
+    active = [n for n in list_nodes() if n.status != "not_configured"]
+    return {"reconciled": True, "active_nodes": len(active)}
 
 @app.get(
     "/api/v1/nodes/{node_id}",

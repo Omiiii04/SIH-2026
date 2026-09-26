@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional
 
-from orchestrator.config import get_settings
 from orchestrator.schemas import InputType, NodeRegistryEntry, NodeType
 
 logger = logging.getLogger(__name__)
@@ -45,83 +44,28 @@ _CAPABILITY_FALLBACK_ORDER: Dict[str, List[NodeType]] = {
 # Registry builder
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_registry() -> Dict[str, NodeRegistryEntry]:
-    cfg = get_settings()
 
-    entries = [
-        NodeRegistryEntry(
-            node_id="NODE-1",
-            node_name="Node 1 (Orchestrator)",
-            capability="text",
-            node_type=NodeType.TEXT,
-            model="",          # populated dynamically from /v1/models on first health probe
-            endpoint=cfg.node_1_url,
-            status=_initial_status(cfg.node_1_url),
-            supported_input_types=[InputType.TEXT.value],
-            priority=1,
-        ),
-        NodeRegistryEntry(
-            node_id="NODE-2",
-            node_name="Node 2",
-            capability="vision",
-            node_type=NodeType.VISION,
-            model="",          # populated dynamically from /v1/models on first health probe
-            endpoint=cfg.node_2_url,
-            status=_initial_status(cfg.node_2_url),
-            supported_input_types=[InputType.IMAGE.value, InputType.TEXT.value],
-            priority=1,
-        ),
-        NodeRegistryEntry(
-            node_id="NODE-3",
-            node_name="Node 3",
-            capability="reasoning",
-            node_type=NodeType.REASONING,
-            model="",          # populated dynamically from /v1/models on first health probe
-            endpoint=cfg.node_3_url,
-            status=_initial_status(cfg.node_3_url),
-            supported_input_types=[InputType.TEXT.value, InputType.REASONING.value],
-            priority=1,
-        ),
-        NodeRegistryEntry(
-            node_id="NODE-4",
-            node_name="Node 4",
-            capability="coding",
-            node_type=NodeType.CODE,
-            model="",          # populated dynamically from /v1/models on first health probe
-            endpoint=cfg.node_4_url,
-            status=_initial_status(cfg.node_4_url),
-            supported_input_types=[InputType.TEXT.value, InputType.CODE.value],
-            priority=1,
-        ),
-        NodeRegistryEntry(
-            node_id="NODE-5",
-            node_name="Node 5",
-            capability="embedding/retrieval",
-            node_type=NodeType.RAG,
-            model="",          # populated dynamically from /v1/models on first health probe
-            endpoint=cfg.node_5_url,
-            status=_initial_status(cfg.node_5_url),
-            supported_input_types=[InputType.TEXT.value, InputType.RETRIEVAL.value],
-            priority=1,
-        ),
-    ]
-    return {e.node_id: e for e in entries}
+def _build_registry() -> Dict[str, NodeRegistryEntry]:
+    """
+    Returns empty dict — registry is now populated dynamically by
+    node_manager.sync_registry_from_db() during application startup.
+
+    Kept so existing callers of reset_registry() still compile.
+    """
+    return {}
 
 
 def _initial_status(endpoint: str) -> str:
     return "not_configured" if not endpoint.strip() else "unknown"
 
 
-# Module-level singleton (mutable for runtime status updates)
-_REGISTRY: Dict[str, NodeRegistryEntry] = _build_registry()
+# Module-level singleton — starts empty, populated by reconcile_nodes_from_env()
+# → sync_registry_from_db() at application startup.
+_REGISTRY: Dict[str, NodeRegistryEntry] = {}
 
-_TYPE_TO_NODE_ID: Dict[NodeType, str] = {
-    e.node_type: e.node_id for e in _REGISTRY.values()
-}
+_TYPE_TO_NODE_ID: Dict[NodeType, str] = {}
 
 _CAPABILITY_TO_NODE_IDS: Dict[str, List[str]] = {}
-for _e in _REGISTRY.values():
-    _CAPABILITY_TO_NODE_IDS.setdefault(_e.capability, []).append(_e.node_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -207,6 +151,34 @@ def set_node_status(node_id: str, status: str) -> bool:
     return True
 
 
+def set_node_capability(node_id: str, capability: str, node_type: "NodeType | None" = None) -> bool:
+    """
+    Override the capability (and optionally node_type) for a registry entry.
+    Used in tests to simulate nodes with specific capabilities.
+    """
+    from orchestrator.schemas import NodeType as _NT
+    node = _REGISTRY.get(node_id)
+    if node is None:
+        logger.warning("set_node_capability: unknown node_id=%s", node_id)
+        return False
+    update: dict = {"capability": capability}
+    if node_type is not None:
+        update["node_type"] = node_type
+    _REGISTRY[node_id] = node.model_copy(update=update)
+    _rebuild_indexes()
+    return True
+
+
+def _rebuild_indexes() -> None:
+    """Rebuild _TYPE_TO_NODE_ID and _CAPABILITY_TO_NODE_IDS from _REGISTRY."""
+    global _TYPE_TO_NODE_ID, _CAPABILITY_TO_NODE_IDS
+    _TYPE_TO_NODE_ID = {e.node_type: e.node_id for e in _REGISTRY.values()}
+    _CAPABILITY_TO_NODE_IDS = {}
+    for e in _REGISTRY.values():
+        _CAPABILITY_TO_NODE_IDS.setdefault(e.capability, []).append(e.node_id)
+
+
+
 def set_node_model(node_id: str, model: str) -> bool:
     """
     Update the active model name for a node (discovered live from /v1/models).
@@ -236,9 +208,30 @@ def set_node_model(node_id: str, model: str) -> bool:
 
 def reset_registry() -> None:
     """
-    Rebuild the registry from settings (clears any runtime status overrides).
-    Useful in tests.
+    Rebuild the registry from the current .env (clears any runtime status overrides).
+    Useful in tests and after sync-config calls.
     """
-    global _REGISTRY
-    _REGISTRY = _build_registry()
-    logger.debug("Registry reset to initial state.")
+    global _REGISTRY, _TYPE_TO_NODE_ID, _CAPABILITY_TO_NODE_IDS
+    from orchestrator.env_nodes import parse_node_configs
+    from orchestrator.schemas import NodeType, InputType
+
+    new: Dict[str, NodeRegistryEntry] = {}
+    for c in parse_node_configs():
+        new[c.node_id] = NodeRegistryEntry(
+            node_id=c.node_id,
+            node_name=c.name or c.node_id,
+            capability="text",
+            node_type=NodeType.TEXT,
+            model="",
+            endpoint=c.url,
+            status="unknown",
+            supported_input_types=[InputType.TEXT.value],
+            priority=c.priority,
+        )
+
+    _REGISTRY = new
+    _TYPE_TO_NODE_ID = {e.node_type: e.node_id for e in new.values()}
+    _CAPABILITY_TO_NODE_IDS = {}
+    for e in new.values():
+        _CAPABILITY_TO_NODE_IDS.setdefault(e.capability, []).append(e.node_id)
+    logger.debug("Registry reset: %d node(s) from .env.", len(new))

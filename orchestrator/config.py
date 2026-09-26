@@ -21,6 +21,9 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # Node configuration uses dynamic keys (NODE_1_URL, NODE_2_NAME, etc.)
+        # that are not declared as fields here.  Ignore them instead of raising.
+        extra="ignore",
     )
 
     # ── Application ──────────────────────────────────────────────────────────
@@ -50,15 +53,6 @@ class Settings(BaseSettings):
     chroma_host: str = "localhost"
     chroma_port: int = 8001
     chroma_collection: str = "conversation_memory"
-
-    # ── Worker Nodes (LM Studio endpoints) ───────────────────────────────────
-    # ── Node Endpoints ────────────────────────────────────────────────────────
-    # Pulled from .env (NODE_1_URL, NODE_2_URL, etc.)
-    node_1_url: str = ""
-    node_2_url: str = ""
-    node_3_url: str = ""
-    node_4_url: str = ""
-    node_5_url: str = ""
 
     # ── HTTP Client ───────────────────────────────────────────────────────────
     http_timeout: float = 30.0        # seconds

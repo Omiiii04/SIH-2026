@@ -14,7 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-from orchestrator.config import get_settings
 from orchestrator.schemas import NodeType
 
 
@@ -39,40 +38,36 @@ class NodeDescriptor:
 
 
 def build_registry() -> Dict[NodeType, NodeDescriptor]:
-    """Build the node registry from current settings."""
-    cfg = get_settings()
-    return {
-        NodeType.TEXT: NodeDescriptor(
-            node_type=NodeType.TEXT,
-            base_url=cfg.node_1_url,
-            description="General-purpose text generation and conversation.",
-            capabilities=["chat", "summarisation", "translation", "Q&A"],
-        ),
-        NodeType.VISION: NodeDescriptor(
-            node_type=NodeType.VISION,
-            base_url=cfg.node_2_url,
-            description="Multimodal vision-language model for image understanding.",
-            capabilities=["image captioning", "visual Q&A", "OCR"],
-        ),
-        NodeType.REASONING: NodeDescriptor(
-            node_type=NodeType.REASONING,
-            base_url=cfg.node_3_url,
-            description="Advanced reasoning and chain-of-thought model.",
-            capabilities=["multi-step reasoning", "analysis", "logical inference"],
-        ),
-        NodeType.CODE: NodeDescriptor(
-            node_type=NodeType.CODE,
-            base_url=cfg.node_4_url,
-            description="Code generation, debugging, and explanation.",
-            capabilities=["code generation", "debugging", "code review", "documentation"],
-        ),
-        NodeType.RAG: NodeDescriptor(
-            node_type=NodeType.RAG,
-            base_url=cfg.node_5_url,
-            description="Retrieval-augmented generation over uploaded documents.",
-            capabilities=["document Q&A", "semantic search", "knowledge retrieval"],
-        ),
-    }
+    """
+    Build the node registry dynamically from .env.
+
+    Previously this function hard-coded exactly 5 nodes keyed by NodeType.
+    Now it discovers all NODE_N_URL entries and assigns each the base TEXT
+    type (since capabilities are determined per-model, not per-node-number).
+
+    The NodeType key is kept as TEXT for all nodes — the scheduler uses
+    model-level capability discovery, not this static type mapping.
+    Kept for backward-compat callers that still use NodeType keys.
+    """
+    from orchestrator.env_nodes import parse_node_configs  # local to avoid circular
+    registry: Dict[NodeType, NodeDescriptor] = {}
+
+    # ponytail: build dynamically; fall back to TEXT for all since
+    # real capabilities come from /v1/models, not node numbering.
+    for c in parse_node_configs():
+        # Use TEXT as default key — unique per node via description
+        # Existing callers that look up by NodeType.TEXT will get the
+        # first configured node (backward-compat behaviour).
+        node_type = NodeType.TEXT
+        if c.node_id not in registry.values():  # avoid overwriting
+            if node_type not in registry:
+                registry[node_type] = NodeDescriptor(
+                    node_type=node_type,
+                    base_url=c.url,
+                    description=f"Worker node {c.index} ({c.node_id})",
+                    capabilities=["chat", "text_generation"],
+                )
+    return registry
 
 
 # Module-level singleton (re-built on each import; lightweight in Phase 1)
@@ -80,8 +75,22 @@ REGISTRY: Dict[NodeType, NodeDescriptor] = build_registry()
 
 
 def get_node(node_type: NodeType) -> NodeDescriptor:
-    """Return the NodeDescriptor for *node_type*, or raise KeyError."""
-    return REGISTRY[node_type]
+    """
+    Return the NodeDescriptor for *node_type*.
+
+    Backward-compat: if the registry doesn't have a node for the exact
+    NodeType (because the static TYPE→node mapping no longer exists),
+    returns the first available node.  Raises KeyError only if the
+    registry is completely empty.
+    """
+    if node_type in REGISTRY:
+        return REGISTRY[node_type]
+    if REGISTRY:
+        # Fall back to first node — stub functions only use the URL anyway
+        return next(iter(REGISTRY.values()))
+    raise KeyError(
+        f"No nodes registered. Check that NODE_N_URL entries exist in .env."
+    )
 
 
 def list_nodes() -> List[NodeDescriptor]:

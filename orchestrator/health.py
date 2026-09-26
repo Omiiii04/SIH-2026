@@ -22,21 +22,24 @@ from orchestrator.schemas import ClusterHealthResponse, NodeHealthSchema, NodeTy
 
 logger = logging.getLogger(__name__)
 
-# Map each NodeType to its configured base URL (resolved at call-time from settings)
-def _node_url_map() -> dict[NodeType, str]:
-    cfg = get_settings()
-    return {
-        NodeType.TEXT: cfg.node_1_url,
-        NodeType.VISION: cfg.node_2_url,
-        NodeType.REASONING: cfg.node_3_url,
-        NodeType.CODE: cfg.node_4_url,
-        NodeType.RAG: cfg.node_5_url,
-    }
+# Build url map dynamically from the node registry (populated from .env by
+# reconcile_nodes_from_env at startup).  Falls back to parse_node_configs
+# so that /health/cluster works even before the async registry is populated.
+def _node_url_map() -> dict[str, str]:
+    """Return a {node_id: endpoint} map for all currently registered nodes."""
+    from orchestrator.node_registry import get_registry
+    registry = get_registry()
+    if registry:
+        return {nid: entry.endpoint for nid, entry in registry.items()}
+
+    # Fallback: read directly from .env (useful before startup completes)
+    from orchestrator.env_nodes import parse_node_configs
+    return {c.node_id: c.url for c in parse_node_configs()}
 
 
 async def _probe_node(
     client: httpx.AsyncClient,
-    node_type: NodeType,
+    node_id: str,
     base_url: str,
     timeout: float,
 ) -> NodeHealthSchema:
@@ -58,7 +61,7 @@ async def _probe_node(
                 model_loaded = models[0].get("id")
 
         return NodeHealthSchema(
-            node_type=node_type,
+            node_type=NodeType.TEXT,  # default; real type from model discovery
             node_url=base_url,
             is_online=resp.status_code == 200,
             latency_ms=round(latency_ms, 2),
@@ -67,9 +70,9 @@ async def _probe_node(
 
     except Exception as exc:
         latency_ms = (time.monotonic() - start) * 1000
-        logger.warning("Node %s (%s) unreachable: %s", node_type, base_url, exc)
+        logger.warning("Node %s (%s) unreachable: %s", node_id, base_url, exc)
         return NodeHealthSchema(
-            node_type=node_type,
+            node_type=NodeType.TEXT,
             node_url=base_url,
             is_online=False,
             latency_ms=round(latency_ms, 2),
@@ -86,8 +89,8 @@ async def get_cluster_health() -> ClusterHealthResponse:
 
     async with httpx.AsyncClient() as client:
         tasks = [
-            _probe_node(client, node_type, url, cfg.http_timeout)
-            for node_type, url in url_map.items()
+            _probe_node(client, node_id, url, cfg.http_timeout)
+            for node_id, url in url_map.items()
         ]
         results: List[NodeHealthSchema] = await asyncio.gather(*tasks)
 

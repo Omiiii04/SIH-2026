@@ -70,99 +70,39 @@ class NodeConfig:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Node Definitions
+# Node Definitions — dynamic from .env
 # ─────────────────────────────────────────────────────────────────────────────
-# Endpoints are injected at runtime from settings (→ .env).
-# This function is called by build_node_configs() below.
-
-def _make_node_configs(
-    node_1_url: str,
-    node_2_url: str,
-    node_3_url: str,
-    node_4_url: str,
-    node_5_url: str,
-) -> Dict[str, NodeConfig]:
-    """
-    Build the ordered dict of all five node configs given their base URLs.
-    """
-    return {
-        "NODE-1": NodeConfig(
-            node_id="NODE-1",
-            node_name="Node 1 (Orchestrator)",
-            capability="text",
-            node_type=NodeType.TEXT,
-            model_name="",   # discovered live from GET /v1/models at health-probe time
-            endpoint=node_1_url,
-            supported_input_types=["text"],
-            laptop_id=1,
-            description="General-purpose chat, summarisation, Q&A, and translation.",
-            test_prompt="In exactly 5 words, what is your purpose?",
-        ),
-        "NODE-2": NodeConfig(
-            node_id="NODE-2",
-            node_name="Node 2",
-            capability="vision",
-            node_type=NodeType.VISION,
-            model_name="",   # discovered live from GET /v1/models at health-probe time
-            endpoint=node_2_url,
-            supported_input_types=["image", "text_image"],
-            laptop_id=2,
-            description="Multimodal image understanding, OCR, and visual Q&A.",
-            test_prompt="Describe what you can do in one sentence.",
-        ),
-        "NODE-3": NodeConfig(
-            node_id="NODE-3",
-            node_name="Node 3",
-            capability="reasoning",
-            node_type=NodeType.REASONING,
-            model_name="",   # discovered live from GET /v1/models at health-probe time
-            endpoint=node_3_url,
-            supported_input_types=["text"],
-            laptop_id=3,
-            description="Step-by-step chain-of-thought reasoning and logical inference.",
-            test_prompt="What is 2 + 2? Think step by step.",
-        ),
-        "NODE-4": NodeConfig(
-            node_id="NODE-4",
-            node_name="Node 4",
-            capability="coding",
-            node_type=NodeType.CODE,
-            model_name="",   # discovered live from GET /v1/models at health-probe time
-            endpoint=node_4_url,
-            supported_input_types=["text", "code"],
-            laptop_id=4,
-            description="Code generation, debugging, review, and documentation.",
-            test_prompt="Write a Python one-liner to reverse a string.",
-        ),
-        "NODE-5": NodeConfig(
-            node_id="NODE-5",
-            node_name="Node 5",
-            capability="embedding/retrieval",
-            node_type=NodeType.RAG,
-            model_name="",   # discovered live from GET /v1/models at health-probe time
-            endpoint=node_5_url,
-            supported_input_types=["text"],
-            laptop_id=5,
-            description="Retrieval-augmented generation over uploaded documents.",
-            test_prompt="Summarise what retrieval-augmented generation means.",
-        ),
-    }
-
+# All NODE_N_URL entries from .env are discovered dynamically.
+# Node capability is NOT derived from the node number (NODE-6 is not
+# automatically "vision" or "code").  Capabilities are discovered from
+# the model metadata returned by GET /v1/models.
 
 def build_node_configs() -> Dict[str, NodeConfig]:
     """
-    Build node configs using URLs from the application settings (→ .env).
-    Call this at module init time.
+    Build node configs from .env using parse_node_configs().
+
+    The NODE-N identifier is deterministic from the env key index.
+    Capability starts as "text" (the safe default); real capabilities
+    are discovered per-model by the scheduler's discover_capabilities().
+
+    Works with any number of nodes — NODE_1 through NODE_N, sparse
+    indexes included.
     """
-    from orchestrator.config import get_settings  # local import to avoid circular deps
-    cfg = get_settings()
-    return _make_node_configs(
-        node_1_url=cfg.node_1_url,
-        node_2_url=cfg.node_2_url,
-        node_3_url=cfg.node_3_url,
-        node_4_url=cfg.node_4_url,
-        node_5_url=cfg.node_5_url,
-    )
+    from orchestrator.env_nodes import parse_node_configs  # local to avoid circular import
+    result: Dict[str, NodeConfig] = {}
+    for c in parse_node_configs():
+        result[c.node_id] = NodeConfig(
+            node_id=c.node_id,
+            node_name=c.name or c.node_id,
+            capability="text",          # base default — real caps from model metadata
+            node_type=NodeType.TEXT,    # placeholder; scheduler uses model-level caps
+            model_name="",             # filled in by health monitor
+            endpoint=c.url,
+            supported_input_types=["text"],
+            laptop_id=c.index,
+            description=f"Worker node {c.index} — capabilities discovered via /v1/models",
+        )
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -172,10 +112,10 @@ NODE_CONFIGS: Dict[str, NodeConfig] = build_node_configs()
 
 
 def get_node_config(node_id: str) -> NodeConfig:
-    """Return a NodeConfig by its node_id string (e.g. 'NODE-TEXT')."""
+    """Return a NodeConfig by its node_id string (e.g. 'NODE-3')."""
     return NODE_CONFIGS[node_id]
 
 
 def list_node_configs() -> List[NodeConfig]:
-    """Return all node configs in laptop order (Laptop 1 → 5)."""
+    """Return all node configs sorted by laptop_id (index)."""
     return sorted(NODE_CONFIGS.values(), key=lambda n: n.laptop_id)

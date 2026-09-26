@@ -29,6 +29,7 @@ from orchestrator.node_registry import (
     get_online_node_for_capability,
     reset_registry,
     set_node_status,
+    set_node_capability,
 )
 from orchestrator.schemas import (
     ClassifierMethod,
@@ -48,6 +49,11 @@ from orchestrator.schemas import (
 def fresh_registry():
     """Reset the registry before every test so status overrides don't leak."""
     reset_registry()
+    # Assign per-node capabilities matching the old static registry layout
+    set_node_capability("NODE-2", "vision",             NodeType.VISION)
+    set_node_capability("NODE-3", "reasoning",           NodeType.REASONING)
+    set_node_capability("NODE-4", "coding",              NodeType.CODE)
+    set_node_capability("NODE-5", "embedding/retrieval", NodeType.RAG)
     yield
     reset_registry()
 

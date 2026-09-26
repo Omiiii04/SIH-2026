@@ -25,7 +25,8 @@ import pytest
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nodes.config import NodeConfig, _make_node_configs
+from nodes.config import NodeConfig, build_node_configs
+from orchestrator.env_nodes import parse_node_configs
 from orchestrator.schemas import NodeType
 from scripts.test_nodes import (
     NodeResult,
@@ -67,15 +68,29 @@ def _make_five_nodes(
     node_4_url: str = "http://node-4:1234",
     node_5_url: str = "http://node-5:1234",
 ):
-    """Build a list of NodeConfigs with the given URLs."""
-    configs = _make_node_configs(
-        node_1_url=node_1_url,
-        node_2_url=node_2_url,
-        node_3_url=node_3_url,
-        node_4_url=node_4_url,
-        node_5_url=node_5_url,
-    )
-    return list(sorted(configs.values(), key=lambda n: n.laptop_id))
+    """Build a list of NodeConfigs with the given URLs via parse_node_configs."""
+    env = {
+        "NODE_1_URL": node_1_url,
+        "NODE_2_URL": node_2_url,
+        "NODE_3_URL": node_3_url,
+        "NODE_4_URL": node_4_url,
+        "NODE_5_URL": node_5_url,
+    }
+    parsed = parse_node_configs(env)
+    return [
+        NodeConfig(
+            node_id=c.node_id,
+            node_name=c.name or c.node_id,
+            capability="text",
+            node_type=NodeType.TEXT,
+            model_name="",
+            endpoint=c.url,
+            supported_input_types=["text"],
+            laptop_id=c.index,
+            description=f"Test node {c.index}",
+        )
+        for c in parsed
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -301,34 +316,32 @@ async def test_scenario4_offline_node_skipped_gracefully():
 
 @pytest.mark.asyncio
 async def test_unconfigured_node_is_marked_not_configured():
-    """An empty endpoint string must produce is_configured=False and no network call."""
-    nodes = _make_node_configs(
+    """Only nodes with a valid URL appear; empty-URL entries are skipped."""
+    # Supply only NODE_1 — empty entries for 2-5 are simply absent from the result.
+    nodes = _make_five_nodes(
         node_1_url="http://configured:1234",
-        node_2_url="",   # not set up yet
+        node_2_url="",
         node_3_url="",
         node_4_url="",
         node_5_url="",
     )
+    # parse_node_configs skips empty URLs → only NODE-1 survives
+    assert len(nodes) == 1, f"Expected 1 configured node, got {len(nodes)}"
     transport = FakeLMStudioTransport()
 
     async with httpx.AsyncClient(transport=transport) as client:
-        results = []
-        for cfg in nodes.values():
-            results.append(await probe_reachability(client, cfg, timeout=5.0))
+        results = [await probe_reachability(client, n, timeout=5.0) for n in nodes]
 
-    by_id = {r.node_id: r for r in results}
-    assert by_id["NODE-1"].is_configured
-    assert by_id["NODE-1"].is_online
-
-    for node_id in ("NODE-2", "NODE-3", "NODE-4", "NODE-5"):
-        assert not by_id[node_id].is_configured
-        assert not by_id[node_id].is_online
+    assert len(results) == 1
+    assert results[0].node_id == "NODE-1"
+    assert results[0].is_configured
+    assert results[0].is_online
 
 
 @pytest.mark.asyncio
 async def test_unconfigured_nodes_do_not_block_configured_ones():
-    """4 unconfigured nodes must not prevent the 1 configured node from succeeding."""
-    nodes = _make_node_configs(
+    """4 absent nodes must not prevent the 1 configured node from succeeding."""
+    nodes = _make_five_nodes(
         node_1_url="http://configured:1234",
         node_2_url="",
         node_3_url="",
@@ -338,7 +351,7 @@ async def test_unconfigured_nodes_do_not_block_configured_ones():
     transport = FakeLMStudioTransport()
 
     async with httpx.AsyncClient(transport=transport) as client:
-        results = [await probe_reachability(client, cfg, timeout=5.0) for cfg in nodes.values()]
+        results = [await probe_reachability(client, cfg, timeout=5.0) for cfg in nodes]
 
     online = [r for r in results if r.is_online]
     assert len(online) == 1
