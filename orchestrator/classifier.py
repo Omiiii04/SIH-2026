@@ -242,13 +242,7 @@ def _classify_by_rules(
         input_modalities.add("document")
     if has_code_attachment or input_type == InputType.CODE:
         input_modalities.add("code")
-    if (
-        input_type == InputType.IMAGE
-        or has_visual_attachment
-        or "image" in query_lower
-        or "picture" in query_lower
-        or "photo" in query_lower
-    ):
+    if has_visual_attachment or input_type == InputType.IMAGE:
         input_modalities.add("image")
         
     tasks = set()
@@ -284,8 +278,11 @@ def _classify_by_rules(
         caps.add("text")
         matched_rules.append("document_attachment")
 
-
     for rule in _RULES:
+        # Vision rules require actual visual content (attachment or explicit image input)
+        if rule.node_type == NodeType.VISION and not (has_visual_attachment or input_type == InputType.IMAGE):
+            continue
+
         for kw in rule.keywords:
             if kw in query_lower:
                 tasks.add(rule.task_type.value)

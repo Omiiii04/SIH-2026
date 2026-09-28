@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { submitQuery, fetchSessions, fetchSessionMessages, deleteSession } from "@/lib/api";
-import type { QueryResponse, NodeFailureResponse, SessionEntry } from "@/lib/types";
+import type { QueryResponse, NodeFailureResponse, SessionEntry, AttachmentMeta } from "@/lib/types";
 
 import { AppShell } from "@/components/layout/AppShell";
 import { Sidebar } from "@/components/sidebar/Sidebar";
@@ -32,12 +32,17 @@ export default function DashboardPage() {
         setActiveSessionId(toSelect);
         const msgs = await fetchSessionMessages(toSelect, "dashboard-user");
         setMessages(msgs);
-      } else if (!toSelect && list.length > 0) {
-        // Default to most recent session on fresh visit if desired
+      } else if (!toSelect && selectSessionId === undefined && list.length > 0) {
+        // Default to most recent session on fresh initial visit only
         setActiveSessionId(list[0].id);
         if (typeof window !== "undefined") sessionStorage.setItem("active_session_id", list[0].id);
         const msgs = await fetchSessionMessages(list[0].id, "dashboard-user");
         setMessages(msgs);
+      } else {
+        // Stay in new chat state (e.g. after deletion or explicit new chat)
+        setActiveSessionId(null);
+        setMessages([]);
+        if (typeof window !== "undefined") sessionStorage.removeItem("active_session_id");
       }
     } catch (err) {
       console.error("Failed to load sessions:", err);
@@ -81,18 +86,25 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Delete session
+  // Delete single session
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     try {
       await deleteSession(sessionId, "dashboard-user");
-      if (activeSessionId === sessionId) {
+      const wasActive = activeSessionId === sessionId;
+      if (wasActive) {
         handleNewChat();
       }
-      loadSessions(activeSessionId === sessionId ? null : activeSessionId);
+      await loadSessions(wasActive ? null : activeSessionId);
     } catch (err) {
       console.error("Failed to delete session:", err);
     }
   }, [activeSessionId, handleNewChat, loadSessions]);
+
+  // Clear all sessions for user
+  const handleClearAllHistory = useCallback(async () => {
+    handleNewChat();
+    await loadSessions(null);
+  }, [handleNewChat, loadSessions]);
 
   const handleSend = useCallback(async (query: string, inputType: string, attachedFile: File | null) => {
     const effectiveQuery = query.trim() ||
@@ -109,12 +121,36 @@ export default function DashboardPage() {
       }
     }
 
+    // Build attachment metadata for user message UI
+    let attachmentMeta: AttachmentMeta | undefined = undefined;
+    if (attachedFile) {
+      const isImg = attachedFile.type.startsWith("image/");
+      const isPdf = attachedFile.name.toLowerCase().endsWith(".pdf") || attachedFile.type === "application/pdf";
+      const isCode = [".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".html", ".css", ".sql", ".sh", ".rs", ".go"].some(
+        ext => attachedFile.name.toLowerCase().endsWith(ext)
+      );
+      const kind = isImg ? "image" : isPdf ? "pdf" : isCode ? "code" : "text";
+
+      attachmentMeta = {
+        filename: attachedFile.name,
+        mime_type: attachedFile.type || "application/octet-stream",
+        size: attachedFile.size,
+        kind: kind,
+        preview_url: isImg ? URL.createObjectURL(attachedFile) : undefined,
+      };
+    }
+
     const userMsgId = crypto.randomUUID();
-    setMessages(prev => [...prev, { id: userMsgId, role: "user", content: effectiveQuery }]);
+    setMessages(prev => [...prev, {
+      id: userMsgId,
+      role: "user",
+      content: query.trim() || "[File attached]",
+      attachments: attachmentMeta ? [attachmentMeta] : [],
+    }]);
     setLoading(true);
 
     try {
-      const { ok, data } = await submitQuery({
+      const result = await submitQuery({
         user_id: "dashboard-user",
         query: effectiveQuery,
         input_type: effectiveInputType,
@@ -122,31 +158,29 @@ export default function DashboardPage() {
         file: attachedFile,
       });
 
-
-      const qr = data as QueryResponse;
       const assistantMsgId = crypto.randomUUID();
-      const content = ok
-        ? qr.response
-        : ((data as NodeFailureResponse)?.detail || "I encountered an error processing your request.");
+      const content = result.ok
+        ? (result.data as QueryResponse).response
+        : (result.errorMessage || (result.data as NodeFailureResponse)?.detail || "I encountered an error processing your request.");
 
       setMessages(prev => [...prev, {
         id: assistantMsgId,
         role: "assistant",
         content: content,
-        result: data,
-        ok: ok,
+        result: result.data,
+        ok: result.ok,
       }]);
 
       // Refresh sidebar sessions from PostgreSQL so title and updated_at appear
       const updatedList = await fetchSessions("dashboard-user");
       setSessions(updatedList);
 
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: "Network error communicating with the Orchestrator.",
+        content: `Error: ${err?.message || "An unexpected error occurred."}`,
       }]);
     } finally {
       setLoading(false);
@@ -173,6 +207,7 @@ export default function DashboardPage() {
           onNewChat={handleNewChat} 
           onSelectSession={handleSelectSession}
           onDeleteSession={handleDeleteSession}
+          onClearHistory={handleClearAllHistory}
         />
       }
     >

@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Settings, X, Server, LayoutPanelLeft, Palette, Network, Cpu, Brain, MessageSquare, Info } from "lucide-react";
+import { Settings, X, Server, LayoutPanelLeft, Palette, Network, Cpu, Brain, MessageSquare, Info, Trash2, Loader2 } from "lucide-react";
 import { useTheme } from "next-themes";
 import useSWR from "swr";
-import { fetchHealth, fetchNodes } from "@/lib/api";
+import { fetchHealth, fetchNodes, clearAllSessions } from "@/lib/api";
 
 const CATEGORIES = [
   { id: "general", label: "General", icon: LayoutPanelLeft },
@@ -16,10 +16,18 @@ const CATEGORIES = [
   { id: "about", label: "About", icon: Info },
 ] as const;
 
-export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+interface SettingsPanelProps {
+  open: boolean;
+  onClose: () => void;
+  onClearHistory?: () => void;
+}
+
+export function SettingsPanel({ open, onClose, onClearHistory }: SettingsPanelProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const { setTheme, theme } = useTheme();
   const [activeCategory, setActiveCategory] = useState<typeof CATEGORIES[number]["id"]>("general");
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const { data: health, error: healthError } = useSWR("/health", fetchHealth, { refreshInterval: 15_000 });
   const { data: nodesData } = useSWR("/api/v1/nodes", fetchNodes, { refreshInterval: 15_000 });
@@ -27,6 +35,20 @@ export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () =>
   const ok = !healthError && health?.status === "ok";
   const nodes = nodesData?.nodes || [];
   const onlineCount = nodes.filter(n => n.status === "ONLINE").length;
+
+  async function handleClearHistory() {
+    setClearing(true);
+    try {
+      await clearAllSessions("dashboard-user");
+      setConfirmClear(false);
+      onClearHistory?.();
+      onClose();
+    } catch (err) {
+      console.error("Failed to clear chat history:", err);
+    } finally {
+      setClearing(false);
+    }
+  }
 
   useEffect(() => {
     if (open) {
@@ -214,18 +236,6 @@ export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () =>
                     </div>
                     <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-muted text-foreground border border-border">Enabled</span>
                   </div>
-                  <div className="pt-3 border-t border-border">
-                    <button 
-                      onClick={() => {
-                        localStorage.removeItem("chat_messages");
-                        localStorage.removeItem("chat_history");
-                        window.location.reload();
-                      }}
-                      className="text-xs text-rose-500 hover:text-rose-600 font-medium px-3 py-1.5 bg-rose-500/10 rounded-md transition-colors"
-                    >
-                      Clear local conversation cache
-                    </button>
-                  </div>
                 </div>
               )}
 
@@ -237,6 +247,46 @@ export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () =>
                       <p className="text-[11px] text-muted-foreground">Always collapsed by default under responses</p>
                     </div>
                     <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-muted text-foreground border border-border">Collapsed</span>
+                  </div>
+
+                  <div className="pt-3 border-t border-border flex flex-col gap-2">
+                    <div>
+                      <p className="font-medium text-foreground">Conversation Management</p>
+                      <p className="text-[11px] text-muted-foreground">Permanently delete all stored chat sessions from the database</p>
+                    </div>
+                    {!confirmClear ? (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmClear(true)}
+                        className="text-xs text-rose-500 hover:text-rose-600 font-medium px-3 py-1.5 bg-rose-500/10 rounded-md transition-colors w-fit flex items-center gap-1.5"
+                      >
+                        <Trash2 size={13} />
+                        <span>Clear chat history</span>
+                      </button>
+                    ) : (
+                      <div className="p-3 rounded-lg border border-rose-500/30 bg-rose-500/5 flex flex-col gap-2">
+                        <p className="text-xs text-foreground font-medium">Delete all chat history for this user? This cannot be undone.</p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={clearing}
+                            onClick={handleClearHistory}
+                            className="px-3 py-1 text-xs font-medium rounded-md bg-rose-500 text-white hover:bg-rose-600 transition-colors flex items-center gap-1.5"
+                          >
+                            {clearing ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                            <span>Yes, clear all history</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={clearing}
+                            onClick={() => setConfirmClear(false)}
+                            className="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

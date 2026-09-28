@@ -571,23 +571,25 @@ async def query(raw_request: FastAPIRequest) -> JSONResponse:
                 except ValueError as exc:
                     raise HTTPException(status_code=400, detail=str(exc))
 
-        input_type = (
-            InputType(input_type_val) if input_type_val in InputType._value2member_map_ else InputType.TEXT
-        )
-
-        req_obj = QueryRequest(
-            user_id=user_id,
-            query=query_text,
-            input_type=input_type,
-            session_id=session_id,
-            attachments=attachments,
-        )
+        try:
+            req_obj = QueryRequest(
+                user_id=user_id,
+                query=query_text,
+                input_type=input_type_val,
+                session_id=session_id,
+                attachments=attachments,
+            )
+        except (ValueError, Exception) as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
     else:
         try:
             body = await raw_request.json()
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}")
-        req_obj = QueryRequest(**body)
+        try:
+            req_obj = QueryRequest(**body)
+        except (ValueError, Exception) as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         normalized_attachments = []
         for a in req_obj.attachments:
             try:
@@ -758,13 +760,17 @@ async def get_session_messages(session_id: str, user_id: str = "dashboard-user")
                         meta = json.loads(m.routing_metadata)
                     except Exception:
                         meta = None
+                attachments_meta = []
+                if meta and isinstance(meta, dict) and "attachments" in meta:
+                    attachments_meta = meta.get("attachments", [])
                 messages.append({
                     "id": m.id,
                     "session_id": m.session_id,
                     "role": m.role,
                     "content": m.content,
+                    "attachments": attachments_meta,
                     "request_id": m.request_id,
-                    "result": meta,
+                    "result": meta if m.role == "assistant" else None,
                     "ok": m.role == "user" or (meta and "error_type" not in meta),
                     "created_at": m.created_at.isoformat(),
                 })
@@ -772,6 +778,27 @@ async def get_session_messages(session_id: str, user_id: str = "dashboard-user")
     except Exception as exc:
         logger.warning("get_session_messages error: %s", exc)
         return {"messages": []}
+
+
+@app.delete(
+    "/api/v1/sessions",
+    tags=["Sessions"],
+    summary="Delete all chat sessions for a user",
+)
+async def clear_user_sessions(user_id: str = "dashboard-user") -> dict:
+    """Delete all conversation sessions belonging to the specified user."""
+    from database.postgres import get_session
+    from orchestrator.models import Session
+    from sqlalchemy import select
+
+    async with get_session() as session:
+        stmt = select(Session).where(Session.user_id == user_id)
+        rows = (await session.execute(stmt)).scalars().all()
+        count = len(rows)
+        for s in rows:
+            await session.delete(s)
+        await session.commit()
+        return {"deleted": True, "count": count}
 
 
 @app.delete(

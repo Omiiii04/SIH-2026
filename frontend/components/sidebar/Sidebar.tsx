@@ -13,6 +13,7 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelectSession: (session: SessionEntry) => void;
   onDeleteSession?: (sessionId: string) => void;
+  onClearHistory?: () => void;
 }
 
 export function Sidebar({
@@ -21,6 +22,7 @@ export function Sidebar({
   onNewChat,
   onSelectSession,
   onDeleteSession,
+  onClearHistory,
 }: SidebarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -72,7 +74,7 @@ export function Sidebar({
       </div>
 
       {searchOpen && <SemanticSearch onClose={() => setSearchOpen(false)} />}
-      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} onClearHistory={onClearHistory} />
     </div>
   );
 }

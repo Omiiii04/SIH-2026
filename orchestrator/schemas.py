@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
 # ── Enums ──────────────────────────────────────────────────────────────────────
@@ -208,6 +208,20 @@ class QueryRequest(BaseModel):
         default=InputType.TEXT,
         description="Hint about the nature of the input (text / image / code / reasoning / retrieval / document).",
     )
+
+    @field_validator("input_type", mode="before")
+    @classmethod
+    def validate_and_normalize_input_type(cls, v: Any) -> InputType:
+        if v is None or v == "" or (isinstance(v, str) and v.strip().lower() == "auto"):
+            return InputType.TEXT
+        if isinstance(v, InputType):
+            return v
+        if isinstance(v, str):
+            clean = v.strip().lower()
+            if clean in InputType._value2member_map_:
+                return InputType(clean)
+        valid_vals = ", ".join(repr(m.value) for m in InputType)
+        raise ValueError(f"Invalid input_type '{v}'. Expected one of: {valid_vals}, or 'auto'/None.")
     session_id: Optional[str] = Field(
         default=None,
         description="Optional session ID for multi-turn conversations.",

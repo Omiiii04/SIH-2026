@@ -116,6 +116,16 @@ async def _write_postgres_success(
             else:
                 existing_sess.updated_at = now
 
+            # User message metadata (strictly lightweight info, never binary)
+            user_meta = None
+            if getattr(request, "attachments", None):
+                user_meta = json.dumps({
+                    "attachments": [
+                        a.to_info().model_dump(mode="json")
+                        for a in request.attachments
+                    ]
+                })
+
             # User message
             session.add(Message(
                 id=f"msg-{uuid.uuid4().hex[:12]}",
@@ -123,6 +133,7 @@ async def _write_postgres_success(
                 user_id=response.user_id,
                 role="user",
                 content=request.query,
+                routing_metadata=user_meta,
                 created_at=now,
             ))
 
@@ -191,12 +202,22 @@ async def _write_postgres_failure(
             else:
                 existing_sess.updated_at = now
 
+            user_meta = None
+            if getattr(request, "attachments", None):
+                user_meta = json.dumps({
+                    "attachments": [
+                        a.to_info().model_dump(mode="json")
+                        for a in request.attachments
+                    ]
+                })
+
             session.add(Message(
                 id=f"msg-{uuid.uuid4().hex[:12]}",
                 session_id=session_id,
                 user_id=response.user_id,
                 role="user",
                 content=request.query,
+                routing_metadata=user_meta,
                 created_at=now,
             ))
 

@@ -68,8 +68,8 @@ def discover_capabilities(
     if any(x in model_lower for x in ["embed", "nomic", "retrieval"]):
         caps.update(["embeddings", "retrieval", "embedding/retrieval"])
 
-    if model_lower or entry.capability == "text":
-        caps.update(["text", "text_generation", "summarization", "structured_output"])
+    # All conversational/instruction models (including vision and multimodal) support text
+    caps.update(["text", "text_generation", "summarization", "structured_output"])
 
     return caps
 
