@@ -307,34 +307,37 @@ class AddNodeRequest(BaseModel):
     summary="Add a new dynamic LAN node",
 )
 async def add_node(req: AddNodeRequest) -> dict:
-    from orchestrator.node_manager import _normalize_endpoint, probe_node, sync_registry_from_db
+    from orchestrator.node_manager import _normalize_endpoint, probe_node
     from database.postgres import get_session
     from database.models import WorkerNode
     from sqlalchemy import select
-    import uuid
+    import uuid as _uuid
 
     norm_endpoint = _normalize_endpoint(req.endpoint)
     if not norm_endpoint.startswith("http"):
         raise HTTPException(status_code=400, detail="Invalid endpoint URL")
 
     async with get_session() as session:
-        # Check duplicate
+        # Check duplicate endpoint
         result = await session.execute(select(WorkerNode).where(WorkerNode.endpoint == norm_endpoint))
         if result.scalar_one_or_none():
             raise HTTPException(status_code=409, detail="Node with this endpoint already exists")
 
-        node_id = f"NODE-{uuid.uuid4().hex[:6].upper()}"
+        node_id = f"NODE-{_uuid.uuid4().hex[:6].upper()}"
         node = WorkerNode(
-            id=node_id,
+            node_id=node_id,          # string key column
             name=req.name,
             endpoint=norm_endpoint,
             enabled=True,
-            priority=req.priority
+            priority=req.priority,
         )
         session.add(node)
         await session.commit()
-    
-    probe_result = await probe_node(node_id)
+
+    try:
+        probe_result = await probe_node(node_id)
+    except Exception as exc:
+        probe_result = {"error": str(exc)}
     return {"message": "Node added successfully", "node_id": node_id, "probe": probe_result}
 
 @app.post(
@@ -358,16 +361,21 @@ async def enable_node(node_id: str) -> dict:
     from database.postgres import get_session
     from database.models import WorkerNode
     from orchestrator.node_manager import probe_node
-    
+    from sqlalchemy import select
+
     node_id = node_id.upper()
     async with get_session() as session:
-        node = await session.get(WorkerNode, node_id)
+        result = await session.execute(select(WorkerNode).where(WorkerNode.node_id == node_id))
+        node = result.unique().scalar_one_or_none()
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
         node.enabled = True
         await session.commit()
-    
-    probe_result = await probe_node(node_id)
+
+    try:
+        probe_result = await probe_node(node_id)
+    except Exception as exc:
+        probe_result = {"error": str(exc)}
     return {"message": "Node enabled", "node_id": node_id, "probe": probe_result}
 
 @app.post(
@@ -380,15 +388,17 @@ async def disable_node(node_id: str) -> dict:
     from database.models import WorkerNode
     from orchestrator.node_manager import sync_registry_from_db
     from orchestrator.node_registry import set_node_status
-    
+    from sqlalchemy import select
+
     node_id = node_id.upper()
     async with get_session() as session:
-        node = await session.get(WorkerNode, node_id)
+        result = await session.execute(select(WorkerNode).where(WorkerNode.node_id == node_id))
+        node = result.unique().scalar_one_or_none()
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
         node.enabled = False
         await session.commit()
-        
+
     set_node_status(node_id, "offline")
     await sync_registry_from_db()
     return {"message": "Node disabled", "node_id": node_id}
@@ -433,31 +443,50 @@ async def get_node(node_id: str) -> dict:
     from database.models import WorkerNode
     from orchestrator.monitor import _NODE_STATES
     from orchestrator.scheduler import discover_capabilities
-    
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
     node_id = node_id.upper()
     async with get_session() as session:
-        node = await session.get(WorkerNode, node_id)
+        result = await session.execute(
+            select(WorkerNode)
+            .options(selectinload(WorkerNode.models))  # eager-load inside session
+            .where(WorkerNode.node_id == node_id)
+        )
+        node = result.unique().scalar_one_or_none()
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
-            
-    models = [m.model_id for m in node.models]
+        # snapshot all data while session is open
+        node_id_str = node.node_id
+        node_endpoint = node.endpoint
+        node_status = node.status
+        node_name = node.name
+        node_enabled = node.enabled
+        db_models = [m.model_id for m in node.models]
+
     state = _NODE_STATES.get(node_id)
+    models = db_models
     if state and state.models_loaded:
         models = list(set(models + state.models_loaded))
-        
-    caps = set()
+
+    caps: set = set()
     from orchestrator.node_registry import _REGISTRY, NodeRegistryEntry
-    registry_entry = _REGISTRY.get(node_id) or NodeRegistryEntry(node_id=node_id, endpoint=node.endpoint, status=node.status, node_name=node.name, capability="", node_type="", model="", supported_input_types=[])
+    from orchestrator.schemas import NodeType as _NT
+    registry_entry = _REGISTRY.get(node_id) or NodeRegistryEntry(
+        node_id=node_id, endpoint=node_endpoint, status=node_status,
+        node_name=node_name, capability="", node_type=_NT.TEXT, model="",
+        supported_input_types=["text"], priority=1,
+    )
     for m in models:
         m_meta = state.models_metadata.get(m) if (state and state.models_metadata) else None
         caps.update(discover_capabilities(registry_entry, m, model_meta=m_meta))
-        
+
     return {
-        "node_id": node.id,
-        "name": node.name,
-        "endpoint": node.endpoint,
-        "enabled": node.enabled,
-        "status": state.status if state else node.status,
+        "node_id": node_id_str,
+        "name": node_name,
+        "endpoint": node_endpoint,
+        "enabled": node_enabled,
+        "status": state.status if state else node_status,
         "latency_ms": state.latency_ms if state else None,
         "models": models,
         "capabilities": sorted(list(caps)),

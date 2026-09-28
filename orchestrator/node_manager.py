@@ -276,12 +276,12 @@ async def probe_node(node_id: str) -> dict:
         result = await session.execute(
             select(WorkerNode).where(WorkerNode.node_id == node_id)
         )
-        node = result.scalar_one_or_none()
+        node = result.unique().scalar_one_or_none()
         if not node:
             raise ValueError(f"Node {node_id!r} not found in DB")
 
         latency_ms = 0.0
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()  # naive UTC — matches TIMESTAMP WITHOUT TIME ZONE columns
         models_data: list[dict] = []
 
         try:
