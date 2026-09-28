@@ -4,9 +4,10 @@ import { useState, useRef, useEffect } from "react";
 import { Plus, ArrowUp, Loader2, X, FileText } from "lucide-react";
 
 interface Props {
-  onSend: (query: string, inputType: string, imageFile: File | null) => void;
+  onSend: (query: string, inputType: string, attachedFile: File | null) => void;
   loading: boolean;
 }
+
 
 export function ChatComposer({ onSend, loading }: Props) {
   const [query, setQuery] = useState("");
@@ -50,10 +51,10 @@ export function ChatComposer({ onSend, loading }: Props) {
     if (!query.trim() && !file) return;
     if (loading) return;
 
-    const inputType = file?.type.startsWith("image/") ? "image" : "text";
-    onSend(query.trim(), inputType, file);
+    onSend(query.trim(), "auto", file);
     setQuery("");
     setFile(null);
+
 
     // Reset textarea height
     if (textareaRef.current) {

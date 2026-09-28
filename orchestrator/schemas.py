@@ -33,9 +33,11 @@ class InputType(str, Enum):
     """
     TEXT = "text"
     IMAGE = "image"
+    DOCUMENT = "document"
     CODE = "code"
     REASONING = "reasoning"
     RETRIEVAL = "retrieval"
+
 
 
 class TaskType(str, Enum):
@@ -156,12 +158,45 @@ class ErrorResponse(BaseModel):
     code: Optional[str] = None
 
 
+class AttachmentKind(str, Enum):
+    """Explicit attachment categories."""
+    IMAGE = "image"
+    PDF = "pdf"
+    TEXT = "text"
+    CODE = "code"
+    UNSUPPORTED = "unsupported"
+
+
+class AttachmentInfo(BaseModel):
+    """Metadata summary for normalized attachments."""
+    filename: str
+    mime_type: str
+    size: int
+    kind: AttachmentKind
+
+
 class Attachment(BaseModel):
     """File attachment (image, document, etc.) in a multimodal request."""
     filename: str
     content_type: str
-    data_base64: str = Field(description="Base64 encoded file data")
+    data_base64: str = Field(default="", description="Base64 encoded file data")
     size_bytes: int = 0
+    kind: AttachmentKind = AttachmentKind.UNSUPPORTED
+    extracted_text: Optional[str] = None
+    rendered_pages: List[str] = Field(
+        default_factory=list,
+        description="Base64-encoded rendered page images (PNG) for visual analysis.",
+    )
+    page_count: Optional[int] = None
+    has_visual_content: bool = False
+
+    def to_info(self) -> AttachmentInfo:
+        return AttachmentInfo(
+            filename=self.filename,
+            mime_type=self.content_type,
+            size=self.size_bytes,
+            kind=self.kind,
+        )
 
 
 class QueryRequest(BaseModel):
@@ -171,7 +206,7 @@ class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, description="The user's question or instruction.")
     input_type: InputType = Field(
         default=InputType.TEXT,
-        description="Hint about the nature of the input (text / image / code / reasoning / retrieval).",
+        description="Hint about the nature of the input (text / image / code / reasoning / retrieval / document).",
     )
     session_id: Optional[str] = Field(
         default=None,
@@ -185,6 +220,15 @@ class QueryRequest(BaseModel):
         default_factory=list,
         description="Optional list of file attachments.",
     )
+    input_modalities: List[str] = Field(
+        default_factory=list,
+        description="Normalized input modalities for this request (e.g. ['text', 'document', 'image']).",
+    )
+    required_capabilities: List[str] = Field(
+        default_factory=list,
+        description="Normalized capabilities required to serve this request (e.g. ['vision']).",
+    )
+
 
 
 class ClassificationResult(BaseModel):

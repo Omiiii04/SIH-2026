@@ -61,6 +61,7 @@ _NODE_TYPE_TO_CAPABILITY: Dict[NodeType, str] = {
 # InputType → NodeType (non-TEXT types bypass keyword scan)
 _INPUT_TYPE_MAP: Dict[InputType, NodeType] = {
     InputType.IMAGE:     NodeType.VISION,
+    InputType.DOCUMENT:  NodeType.TEXT,
     InputType.CODE:      NodeType.CODE,
     InputType.REASONING: NodeType.REASONING,
     InputType.RETRIEVAL: NodeType.RAG,
@@ -70,11 +71,13 @@ _INPUT_TYPE_MAP: Dict[InputType, NodeType] = {
 # InputType → fine-grained TaskType default
 _INPUT_TYPE_TASK: Dict[InputType, TaskType] = {
     InputType.IMAGE:     TaskType.VISUAL_QA,
+    InputType.DOCUMENT:  TaskType.SUMMARIZATION,
     InputType.CODE:      TaskType.CODING,
     InputType.REASONING: TaskType.REASONING,
     InputType.RETRIEVAL: TaskType.DOCUMENT_RETRIEVAL,
     InputType.TEXT:      TaskType.GENERAL_QA,
 }
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -214,18 +217,39 @@ def _classify_by_rules(
 ) -> ClassificationResult:
     query_lower = query.lower()
 
-    has_image_attachment = any(
-        getattr(a, "content_type", "").startswith("image/")
+    has_visual_attachment = any(
+        getattr(a, "has_visual_content", False)
+        or str(getattr(a, "content_type", "")).startswith("image/")
+        or str(getattr(a, "kind", "")) in ("image", "AttachmentKind.IMAGE")
         for a in (attachments or [])
     )
-    if has_image_attachment:
+    has_document_attachment = any(
+        str(getattr(a, "kind", "")) in ("pdf", "text", "code", "AttachmentKind.PDF", "AttachmentKind.TEXT", "AttachmentKind.CODE")
+        or str(getattr(a, "content_type", "")) == "application/pdf"
+        or getattr(a, "extracted_text", None) is not None
+        for a in (attachments or [])
+    )
+    has_code_attachment = any(
+        str(getattr(a, "kind", "")) in ("code", "AttachmentKind.CODE")
+        for a in (attachments or [])
+    )
+
+    if has_visual_attachment:
         input_type = InputType.IMAGE
 
     input_modalities = {"text"}
-    if input_type == InputType.IMAGE or "image" in query_lower or "picture" in query_lower or "photo" in query_lower:
-        input_modalities.add("image")
-    elif input_type == InputType.CODE:
+    if has_document_attachment:
+        input_modalities.add("document")
+    if has_code_attachment or input_type == InputType.CODE:
         input_modalities.add("code")
+    if (
+        input_type == InputType.IMAGE
+        or has_visual_attachment
+        or "image" in query_lower
+        or "picture" in query_lower
+        or "photo" in query_lower
+    ):
+        input_modalities.add("image")
         
     tasks = set()
     caps = set()
@@ -236,7 +260,15 @@ def _classify_by_rules(
     best_task = None
     best_cap = None
 
-    if input_type != InputType.TEXT:
+    if has_visual_attachment:
+        tasks.add(TaskType.VISUAL_QA.value)
+        caps.add("vision")
+        best_confidence = 1.0
+        best_method = ClassifierMethod.RULE_EXPLICIT
+        best_task = TaskType.VISUAL_QA
+        best_cap = "vision"
+        matched_rules.append("multimodal_visual_attachment")
+    elif input_type != InputType.TEXT:
         node_type  = _INPUT_TYPE_MAP.get(input_type, NodeType.TEXT)
         task_type  = _INPUT_TYPE_TASK.get(input_type, TaskType.GENERAL_QA)
         capability = _NODE_TYPE_TO_CAPABILITY.get(node_type, "text")
@@ -247,6 +279,11 @@ def _classify_by_rules(
         best_task = task_type
         best_cap = capability
         matched_rules.append(f"explicit_input_type:{input_type.value}")
+    elif has_document_attachment:
+        tasks.add(TaskType.SUMMARIZATION.value)
+        caps.add("text")
+        matched_rules.append("document_attachment")
+
 
     for rule in _RULES:
         for kw in rule.keywords:

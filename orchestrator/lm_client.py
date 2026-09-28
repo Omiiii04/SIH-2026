@@ -78,29 +78,56 @@ def _build_messages(
     if context:
         messages.extend(context)
 
-    # Check for image attachments
-    image_attachments = [
-        att for att in (attachments or [])
-        if getattr(att, "content_type", "").startswith("image/")
-    ]
+    # Build text content and visual multimodal parts
+    text_blocks = [query] if query else []
+    visual_parts: List[Dict[str, Any]] = []
 
-    if image_attachments:
-        # Construct multimodal content array (OpenAI / LM Studio format)
-        parts: List[Dict[str, Any]] = [{"type": "text", "text": query}]
-        for att in image_attachments:
+    for att in (attachments or []):
+        filename = getattr(att, "filename", "document")
+        extracted = getattr(att, "extracted_text", None)
+        kind = str(getattr(att, "kind", ""))
+
+        if extracted:
+            text_blocks.append(f"\n\n[Attachment: {filename}]\n{extracted}")
+
+        # Check visual content: image attachments and rendered PDF pages
+        is_image = getattr(att, "content_type", "").startswith("image/") or kind in ("image", "AttachmentKind.IMAGE")
+        has_visual = getattr(att, "has_visual_content", False)
+
+        if is_image:
             b64_data = getattr(att, "data_base64", "")
             mime = getattr(att, "content_type", "image/png")
-            parts.append({
+            if b64_data:
+                visual_parts.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{mime};base64,{b64_data}"
+                    }
+                })
+
+        # Rendered PDF pages (scanned or image-based PDFs)
+        rendered_pages = getattr(att, "rendered_pages", [])
+        for page_b64 in (rendered_pages or []):
+            visual_parts.append({
                 "type": "image_url",
                 "image_url": {
-                    "url": f"data:{mime};base64,{b64_data}"
+                    "url": f"data:image/png;base64,{page_b64}"
                 }
             })
+
+    combined_text = "\n".join(text_blocks).strip()
+    if not combined_text and visual_parts:
+        combined_text = "Describe this visual content."
+
+    if visual_parts:
+        parts: List[Dict[str, Any]] = [{"type": "text", "text": combined_text}]
+        parts.extend(visual_parts)
         messages.append({"role": "user", "content": parts})
     else:
-        messages.append({"role": "user", "content": query})
+        messages.append({"role": "user", "content": combined_text})
 
     return messages
+
 
 
 def _build_payload(
@@ -230,6 +257,8 @@ async def call_node(
                 detail=f"Model returned empty content (finish_reason: {finish_reason}).",
                 latency_ms=latency_ms,
             )
+
+
 
         usage = data.get("usage", {})
         actual_model = data.get("model", model)

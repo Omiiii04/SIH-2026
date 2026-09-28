@@ -536,6 +536,11 @@ async def query(raw_request: FastAPIRequest) -> JSONResponse:
     """
     import base64
     from orchestrator.schemas import Attachment, InputType
+    from orchestrator.attachments import (
+        process_attachment_bytes,
+        normalize_attachment,
+        normalize_request,
+    )
 
     content_type = raw_request.headers.get("content-type", "")
     attachments: List[Attachment] = []
@@ -558,17 +563,15 @@ async def query(raw_request: FastAPIRequest) -> JSONResponse:
         for f in form_files:
             if hasattr(f, "read"):
                 file_bytes = await f.read()
+                filename = getattr(f, "filename", "attachment") or "attachment"
                 ct = getattr(f, "content_type", None) or "application/octet-stream"
-                b64 = base64.b64encode(file_bytes).decode("ascii")
-                attachments.append(Attachment(
-                    filename=getattr(f, "filename", "attachment") or "attachment",
-                    content_type=ct,
-                    data_base64=b64,
-                    size_bytes=len(file_bytes),
-                ))
+                try:
+                    att = process_attachment_bytes(filename, ct, file_bytes)
+                    attachments.append(att)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc))
 
-        has_image = any(a.content_type.startswith("image/") for a in attachments)
-        input_type = InputType.IMAGE if has_image else (
+        input_type = (
             InputType(input_type_val) if input_type_val in InputType._value2member_map_ else InputType.TEXT
         )
 
@@ -585,8 +588,34 @@ async def query(raw_request: FastAPIRequest) -> JSONResponse:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}")
         req_obj = QueryRequest(**body)
-        if req_obj.attachments and any(a.content_type.startswith("image/") for a in req_obj.attachments):
-            req_obj.input_type = InputType.IMAGE
+        normalized_attachments = []
+        for a in req_obj.attachments:
+            try:
+                normalized_attachments.append(normalize_attachment(a))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+        req_obj.attachments = normalized_attachments
+
+    # Deduce normalized modalities and required capabilities
+    modalities, required_caps = normalize_request(req_obj.query, req_obj.attachments)
+    req_obj.input_modalities = modalities
+    req_obj.required_capabilities = required_caps
+
+    if "image" in modalities:
+        req_obj.input_type = InputType.IMAGE
+    elif "document" in modalities and req_obj.input_type == InputType.TEXT:
+        req_obj.input_type = InputType.DOCUMENT
+
+    logger.info(
+        "Request normalized: user=%s query_len=%d attachments=%d modalities=%s required_caps=%s input_type=%s",
+        req_obj.user_id,
+        len(req_obj.query),
+        len(req_obj.attachments),
+        req_obj.input_modalities,
+        req_obj.required_capabilities,
+        req_obj.input_type,
+    )
+
 
     result = await handle_query(req_obj, timeout=cfg.http_timeout)
 

@@ -134,12 +134,25 @@ async def handle_query(
     )
     classification_ms = (time.monotonic() - t_class_start) * 1000
 
+    # Merge request-level modalities and capabilities into classification result
+    if request.input_modalities:
+        for m in request.input_modalities:
+            if m not in cls.input_modalities:
+                cls.input_modalities.append(m)
+    if request.required_capabilities:
+        for c in request.required_capabilities:
+            if c not in cls.required_capabilities:
+                cls.required_capabilities.append(c)
+        if "vision" in request.required_capabilities:
+            cls.required_capability = "vision"
+
     logger.info(
-        "[%s] Classified -> task=%s  capability=%s  difficulty=%s  confidence=%.2f  method=%s  modalities=%s",
+        "[%s] Classified -> task=%s  capability=%s  difficulty=%s  confidence=%.2f  method=%s  modalities=%s  required_caps=%s",
         request_id, cls.task_type, cls.required_capability,
         cls.difficulty, cls.confidence, cls.classifier_method,
-        cls.input_modalities,
+        cls.input_modalities, cls.required_capabilities,
     )
+
 
     # Step 2: retry loop over dynamic scheduler candidates
     tried_nodes: set[str] = set()

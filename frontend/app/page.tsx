@@ -94,11 +94,10 @@ export default function DashboardPage() {
     }
   }, [activeSessionId, handleNewChat, loadSessions]);
 
-  const handleSend = useCallback(async (query: string, inputType: string, imageFile: File | null) => {
+  const handleSend = useCallback(async (query: string, inputType: string, attachedFile: File | null) => {
     const effectiveQuery = query.trim() ||
-      (imageFile ? `📎 ${imageFile.name}` : "[File attached]");
-    const effectiveInputType =
-      imageFile?.type.startsWith("image/") ? "image" : inputType;
+      (attachedFile ? `📎 ${attachedFile.name}` : "[File attached]");
+    const effectiveInputType = inputType || "auto";
 
     // Determine current or new session ID
     let currentSessionId = activeSessionId;
@@ -120,8 +119,9 @@ export default function DashboardPage() {
         query: effectiveQuery,
         input_type: effectiveInputType,
         session_id: currentSessionId,
-        file: imageFile,
+        file: attachedFile,
       });
+
 
       const qr = data as QueryResponse;
       const assistantMsgId = crypto.randomUUID();
