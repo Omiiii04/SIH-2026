@@ -22,7 +22,7 @@ from typing import List, Union, Optional
 import uuid
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, status, Request as FastAPIRequest
+from fastapi import FastAPI, HTTPException, UploadFile, File, status, Request as FastAPIRequest
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -72,10 +72,21 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("PostgreSQL unavailable at startup: %s -- persistence disabled.", exc)
 
-    # ChromaDB
+    # ChromaDB — run via run_in_executor (NOT asyncio.to_thread) because
+    # to_thread copies the current asyncio context into the thread via
+    # contextvars.copy_context(). chromadb.HttpClient detects the running event
+    # loop through those copied context vars and takes a broken async code path.
+    # run_in_executor(None, ...) spawns a plain thread with no asyncio context.
     try:
+        import asyncio as _asyncio
         from database.chroma import init_chroma
-        init_chroma()
+        _loop = _asyncio.get_event_loop()
+        await _loop.run_in_executor(None, init_chroma)
+        from database import chroma as _chroma_mod
+        if _chroma_mod._rag_collection is not None:
+            logger.info("ChromaDB: both collections ready (conversation_memory + rag_documents).")
+        else:
+            logger.warning("ChromaDB: init_chroma() ran but _rag_collection is still None — RAG disabled.")
     except Exception as exc:
         logger.warning("ChromaDB unavailable at startup: %s -- memory search disabled.", exc)
 
@@ -867,6 +878,109 @@ async def memory_search(request: MemorySearchRequest) -> MemorySearchResponse:
         total=len(results),
         results=results,
     )
+
+
+# ── RAG Document Upload & Query ───────────────────────────────────────────────
+
+@app.post(
+    "/api/v1/rag/upload",
+    tags=["RAG"],
+    summary="Upload a file and index it into ChromaDB for RAG",
+)
+async def rag_upload(file: UploadFile = File(...)) -> dict:
+    """
+    Upload a document (PDF, TXT, MD, CSV, code file) and index its text
+    content into the ``rag_documents`` ChromaDB collection.
+
+    Returns:
+        doc_id      — the UUID assigned to this document
+        filename    — sanitized filename
+        chunks      — number of chunks indexed
+        chars       — total characters extracted
+    """
+    from database.chroma import add_document_chunks
+    from orchestrator.attachments import process_attachment_bytes
+
+    file_bytes = await file.read()
+    content_type = file.content_type or "application/octet-stream"
+    filename = file.filename or "upload"
+
+    try:
+        attachment = process_attachment_bytes(filename, content_type, file_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+
+    text = attachment.extracted_text or ""
+    if not text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"No extractable text found in '{filename}'. "
+                "Image-only PDFs and binary files are not supported for RAG ingestion."
+            ),
+        )
+
+    doc_id = str(uuid.uuid4())
+    import asyncio as _asyncio
+    _loop = _asyncio.get_event_loop()
+    n_chunks = await _loop.run_in_executor(
+        None,
+        lambda: add_document_chunks(
+            doc_id=doc_id,
+            filename=attachment.filename,
+            text=text,
+            metadata={
+                "content_type": attachment.content_type,
+                "size_bytes": attachment.size_bytes,
+            },
+        ),
+    )
+
+    if n_chunks == 0:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Text was extracted successfully but ChromaDB could not store the document chunks. "
+                "Ensure the ChromaDB container is healthy (check: docker ps). "
+                f"Extracted {len(text)} chars from '{attachment.filename}'."
+            ),
+        )
+
+    logger.info("RAG upload: doc_id=%s filename=%s chunks=%d", doc_id, attachment.filename, n_chunks)
+    return {
+        "doc_id":   doc_id,
+        "filename": attachment.filename,
+        "chunks":   n_chunks,
+        "chars":    len(text),
+    }
+
+
+@app.post(
+    "/api/v1/rag/query",
+    tags=["RAG"],
+    summary="Semantic search across indexed RAG documents",
+)
+async def rag_query(body: dict) -> dict:
+    """
+    Body: ``{ "query": "...", "n_results": 5, "doc_id": "<optional>" }``
+
+    Returns the top-k most relevant document chunks.
+    """
+    from database.chroma import query_documents
+
+    query = (body.get("query") or "").strip()
+    if not query:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="'query' is required.")
+
+    n_results = int(body.get("n_results", 5))
+    doc_id    = body.get("doc_id") or None
+
+    chunks = query_documents(query=query, n_results=n_results, doc_id=doc_id)
+    return {
+        "query":    query,
+        "total":    len(chunks),
+        "results":  chunks,
+    }
 
 
 # Phase 1 stub (kept for backward compatibility)

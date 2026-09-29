@@ -5,6 +5,7 @@ import { Settings, X, Server, LayoutPanelLeft, Palette, Network, Cpu, Brain, Mes
 import { useTheme } from "next-themes";
 import useSWR from "swr";
 import { fetchHealth, fetchNodes, clearAllSessions } from "@/lib/api";
+import { RagDocuments } from "./RagDocuments";
 
 const CATEGORIES = [
   { id: "general", label: "General", icon: LayoutPanelLeft },
@@ -236,8 +237,13 @@ export function SettingsPanel({ open, onClose, onClearHistory }: SettingsPanelPr
                     </div>
                     <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-muted text-foreground border border-border">Enabled</span>
                   </div>
+
+                  <div className="border-t border-border/50 pt-2">
+                    <RagDocuments />
+                  </div>
                 </div>
               )}
+
 
               {activeCategory === "chat" && (
                 <div className="flex flex-col gap-4 text-xs">

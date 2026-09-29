@@ -195,18 +195,69 @@ async def handle_query(
 
         t_call_start = time.monotonic()
 
+        # ── RAG context injection ────────────────────────────────────────────
+        # Use run_in_executor (NOT asyncio.to_thread) — to_thread copies the
+        # asyncio context vars (including the running event loop) into the thread,
+        # which causes chromadb's sync client to malfunction.
+        #
+        # Only inject context when the top chunk is actually relevant.
+        # Below RAG_SCORE_THRESHOLD the LM answers from its training data as normal.
+        RAG_SCORE_THRESHOLD = 0.45
+        rag_system_prompt: str | None = None
+        try:
+            import asyncio as _asyncio
+            from database.chroma import query_documents
+            _loop = _asyncio.get_event_loop()
+            chunks = await _loop.run_in_executor(
+                None,
+                lambda: query_documents(query=request.query, n_results=5),
+            )
+            # Filter to only chunks that are meaningfully relevant
+            relevant = [c for c in chunks if c["score"] >= RAG_SCORE_THRESHOLD]
+            if relevant:
+                context_block = "\n\n".join(
+                    f"[Source: {c['filename']} | chunk {c['chunk_index'] + 1}]\n{c['text']}"
+                    for c in relevant
+                )
+                rag_system_prompt = (
+                    "You are a helpful assistant with access to the following document excerpts. "
+                    "Use them to answer the user's question when relevant. "
+                    "If the documents don't fully address the question, supplement with your own knowledge "
+                    "and clearly indicate which parts come from the documents.\n\n"
+                    "=== DOCUMENT CONTEXT ===\n"
+                    f"{context_block}\n"
+                    "========================"
+                )
+                logger.info(
+                    "[%s] RAG: injecting %d/%d chunks (top score=%.2f) from %s",
+                    request_id, len(relevant), len(chunks),
+                    relevant[0]["score"],
+                    relevant[0]["filename"],
+                )
+            else:
+                logger.debug(
+                    "[%s] RAG: %d chunks found but all below threshold %.2f (top=%.2f) — skipping context injection",
+                    request_id, len(chunks), RAG_SCORE_THRESHOLD,
+                    chunks[0]["score"] if chunks else 0.0,
+                )
+        except Exception as _rag_exc:
+            logger.warning("[%s] RAG context fetch failed: %s", request_id, _rag_exc)
+
+
         try:
             lm_resp: LMResponse = await call_node(
                 endpoint=node.endpoint,
                 model=model_name,
                 query=request.query,
                 attachments=request.attachments,
+                system_prompt=rag_system_prompt,
                 parameters=request.parameters,
                 timeout=timeout,
                 request_id=request_id,
                 attempt=attempt + 1,
                 node_id=node.node_id,
             )
+
         except LMClientError as exc:
             last_exc = exc
             logger.warning(
